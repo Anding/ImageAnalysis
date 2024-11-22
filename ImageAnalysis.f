@@ -13,7 +13,7 @@
 	2 +LOOP
 ;
 
-: image.mean ( -- mean) { | cumulative_intensity cumulative_pixels }		\ VFX locals
+: histogram.mean ( -- mean) { | cumulative_intensity cumulative_pixels }		\ VFX locals
 \ compute the mean pixel level based on the histogram
 	zero cumulative_intensity
 	zero cumulative_pixels
@@ -26,7 +26,7 @@
 	cumulative_intensity cumulative_pixels / ( mean)
 ;
 
-: image.median ( -- x) { | cumulative_pixels half_total_pixels }		\ VFX locals
+: histogram.median ( -- x) { | cumulative_pixels half_total_pixels }		\ VFX locals
 \ compute the median pixel level based on the histogram
 	zero cumulative_pixels					\ first find the total number of pixels in the image
 	0x10000 0	( end start)
@@ -46,7 +46,7 @@
 	repeat	( median)
 ;
 
-: image.saturated ( hist -- x)
+: histogram.saturated ( hist -- x)
 \ count the number of saturated pixels based on the histogram
 	hist.buffer 0x3fffc + @
 ;
