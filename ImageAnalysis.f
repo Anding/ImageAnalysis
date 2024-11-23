@@ -7,7 +7,7 @@
 : make-histogram ( x y addr --)
 \ prepare a full-resolution histogram for an x * y * 16bit monochrome image at addr
 	hist.buffer 0x40000 erase
-	>R * 2* R@ + R> ( end start) 
+	>R * 2* R@ + R> ( end start)
 	DO
 		i w@ 4* hist.buffer + incr
 	2 +LOOP
@@ -23,7 +23,7 @@
 		dup add cumulative_pixels			\ update cumulative pixels; expect x * y at the end
 		i * add cumulative_intensity		\ update cumulative intensity
 	LOOP	
-	cumulative_intensity cumulative_pixels / ( mean)
+	cumulative_intensity cumulative_pixels u/ ( mean)
 ;
 
 : histogram.median ( -- x) { | cumulative_pixels half_total_pixels }		\ VFX locals
