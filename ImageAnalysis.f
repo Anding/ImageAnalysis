@@ -13,17 +13,17 @@
 	2 +LOOP
 ;
 
-: histogram.mean ( -- mean) { | cumulative_intensity cumulative_pixels }		\ VFX locals
+: histogram.mean ( -- mean) { | cumulative_pixels }		\ VFX locals
 \ compute the mean pixel level based on the histogram
-	zero cumulative_intensity
+	0 0 ( cumulative_intensity)
 	zero cumulative_pixels
 	0x10000 0 	( end start)
 	DO
-		i 4* hist.buffer + @					\ num of pixels at this value of the histogram
-		dup add cumulative_pixels			\ update cumulative pixels; expect x * y at the end
-		i * add cumulative_intensity		\ update cumulative intensity
+		i 4* hist.buffer + @								\ num of pixels at this value of the histogram
+		dup add cumulative_pixels						\ update cumulative pixels; expect x * y at the end
+		( cumulative_intensity pixels) i um* d+	\ update cumulative intensity
 	LOOP	
-	cumulative_intensity cumulative_pixels u/ ( mean)
+	( cumulative_intensity) cumulative_pixels .s  UM/MOD nip ( mean)
 ;
 
 : histogram.median ( -- x) { | cumulative_pixels half_total_pixels }		\ VFX locals
