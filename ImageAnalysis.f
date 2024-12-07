@@ -23,7 +23,7 @@
 		dup add cumulative_pixels						\ update cumulative pixels; expect x * y at the end
 		( cumulative_intensity pixels) i um* d+	\ update cumulative intensity
 	LOOP	
-	( cumulative_intensity) cumulative_pixels .s  UM/MOD nip ( mean)
+	( cumulative_intensity) cumulative_pixels UM/MOD nip ( mean)
 ;
 
 : histogram.median ( -- x) { | cumulative_pixels half_total_pixels }		\ VFX locals
