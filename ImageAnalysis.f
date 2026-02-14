@@ -1,44 +1,58 @@
 \ astronomical image analysis in Forth
 
-0x40000 buffer: hist.buffer
-0x40000 buffer: hist.buffer2
-\ one cell for each 16 bit brightness value
+BEGIN-STRUCTURE IMAGE_STATISTICS
+    0x40000 +FIELD HISTOGRAM                        \ one 32 bit cell for each 16 bit brightness value
+    0x40000 +FIELD HISTOGRAM_ABSOLUTE_DEVIATION     \ histogram of the absolute deviations of the pixels from the median
+          4 +FIELD TOTAL_PIXELS
+          4 +FIELD MEAN
+          4 +FIELD MEDIAN
+          4 +FIELD MEDIAN_ABSOLUTE_DEVIATION
+END-STRUCTURE
 
-: make-histogram ( x y addr --)
-\ prepare a full-resolution histogram for an x * y * 16bit monochrome image at addr
-	hist.buffer 0x40000 erase
-	>R * 2* R@ + R> ( end start)
+: allocate-imageStats ( -- imageStats)
+    IMAGE_STATISTICS allocate abort" unable to allocate image statistics" 
+;
+
+: compute-histogram { image imageStats -- }
+\ prepare a full-resolution histogram for an image 
+	image IMAGE_SIZE_BYTES 2/ dup >R imageStats TOTAL_PIXELS !
+	imageStats HISTOGRAM 0x40000 erase
+	image IMAGE_BITMAP dup R> + swap ( end start)
 	DO
-		i w@ 4* hist.buffer + incr
+		i w@ 
+		4* imageStats HISTOGRAM + incr
 	2 +LOOP
 ;
 
-: histogram.mean ( -- mean) { | cumulative_pixels }		\ VFX locals
+: compute-ASBDhistogram { image imageStats | _median -- }
+\ prepare a full-resolution histogram of the absolute deviation values of image 
+    imageStats MEDIAN @ -> _median
+	imageStats 0x40000 HISTOGRAM_ABSOLUTE_DEVIATION erase
+	image IMAGE_BITMAP dup imageStats TOTAL_PIXELS @ + swap ( end start)
+	DO
+		i w@ _median - abs
+		4* imageStats HISTOGRAM_ABSOLUTE_DEVIATION + incr
+	2 +LOOP
+;  
+    
+: compute-mean { imageStats -- }
 \ compute the mean pixel level based on the histogram
-	0 0 ( cumulative_intensity)
-	zero cumulative_pixels
+	0 0 ( cumulative_intensity as a double number)
 	0x10000 0 	( end start)
 	DO
-		i 4* hist.buffer + @								\ num of pixels at this value of the histogram
-		dup add cumulative_pixels						\ update cumulative pixels; expect x * y at the end
-		( cumulative_intensity pixels) i um* d+	\ update cumulative intensity
+		imageStats i 4* + @	    					    \ num of pixels at this value of the histogram
+		( cumulative_intensity pixels) i um* d+	        \ update cumulative intensity
 	LOOP	
-	( cumulative_intensity) cumulative_pixels UM/MOD nip ( mean)
+	( cumulative_intensity) imageStats TOTAL_PIXELS @ UM/MOD nip ( mean)
+	imageStats MEAN !
 ;
 
-: histogram.median ( -- x) { | cumulative_pixels half_total_pixels }		\ VFX locals
+: histogram.median { histbuffer total_pixels | half_total_pixels cumulative_pixels -- median }
 \ compute the median pixel level based on the histogram
-	zero cumulative_pixels					\ first find the total number of pixels in the image
-	0x10000 0	( end start)
-	DO
-		i 4* hist.buffer + @					\ num of pixels at this value of the histogram
-		add cumulative_pixels				\ update cumulative pixels; expect x * y at the end
-	LOOP	
-	cumulative_pixels 2/ -> half_total_pixels 
-
-	zero cumulative_pixels					\ now iterate until half the total number of pixels have been counted
+	total_pixels @ 2/ -> half_total_pixels 
+	zero total_pixels	    				\ now iterate until half the total number of pixels have been counted
 	0 begin
-		dup 4* hist.buffer + @				\ num of pixels at this value of the histogram
+		dup 4* histbuffer + @				\ num of pixels at this value of the histogram
 		add cumulative_pixels				\ update cumulative pixels
 		cumulative_pixels half_total_pixels <
 	while
@@ -46,6 +60,22 @@
 	repeat	( median)
 ;
 
+: compute-median ( imageStats -- )
+    R> R@ HISTOGRAM R@ TOTAL_PIXELS @ histogram.median 
+    R> MEDIAN !
+;
+
+: compute-median_absolute_deviation ( imageStats -- )
+    R> R@ HISTOGRAM_ABSOLUTE_DEVIATION R@ TOTAL_PIXELS @ histogram.median 
+    R> MEDIAN_ABSOLUTE_DEVIATION !
+;
+
+: initialize-imageStats { image imageStats }
+    image imageStats compute-histogram 
+    imageStats compute-mean 
+    imageStats compute-median
+;
+    
 : histogram.saturated ( hist -- x)
 \ count the number of saturated pixels based on the histogram
 	hist.buffer 0x3fffc + @
