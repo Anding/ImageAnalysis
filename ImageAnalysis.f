@@ -1,4 +1,5 @@
 \ astronomical image analysis in Forth
+need ForthXISF
 
 BEGIN-STRUCTURE IMAGE_STATISTICS
     0x40000 +FIELD HISTOGRAM                        \ one 32 bit cell for each 16 bit brightness value
@@ -13,15 +14,32 @@ END-STRUCTURE
     IMAGE_STATISTICS allocate abort" unable to allocate image statistics" 
 ;
 
+CODE <histogram> ( bitmap histogram n  -- )
+    \ Load pointers: EDX = source, ECX = destination. EBX contains byte count.
+    mov     edx, 4 [ebp]            \ source pointer
+    mov     ecx, 0 [ebp]            \ histogram pointer    
+    test    ebx, ebx                \ check if byte count is zero
+    jz      L$2
+L$1:
+    cmp     ebx, 2                  \ check if at least 2 bytes remain
+    jb      L$2
+    movzx   eax, word 0 [edx]       \ load 16-bit word with zero extend
+    inc     dword 0 [ecx] [eax*4]   \ increment the longword at address = ax + ecx
+    add     edx, 2                  \ move source pointer forward 2 bytes
+    sub     ebx, 2                  \ decrement byte counter by 2
+    jmp     L$1                     \ continue loop
+L$2:
+    mov ebx, 08 [ebp]               \ move the 3rd stack item to the cached TOS
+    lea ebp, 12 [ebp]               \ move the stack pointer up by 3 cells
+    NEXT,    
+END-CODE
+
 : compute-histogram { image imageStats -- }
 \ prepare a full-resolution histogram for an image 
-	image IMAGE_SIZE_BYTES 2/ dup >R imageStats TOTAL_PIXELS !
-	imageStats HISTOGRAM 0x40000 erase
-	image IMAGE_BITMAP dup R> + swap ( end start)
-	DO
-		i w@ 
-		4* imageStats HISTOGRAM + incr
-	2 +LOOP
+    image IMAGE_BITMAP
+	imageStats HISTOGRAM dup 0x40000 erase
+	image IMAGE_SIZE_BYTES @ dup imageStats TOTAL_PIXELS !
+    ( bitmap histogram n ) <histogram> 
 ;
 
 : compute-ASBDhistogram { image imageStats | _median -- }
@@ -76,22 +94,22 @@ END-STRUCTURE
     imageStats compute-median
 ;
     
-: histogram.saturated ( hist -- x)
+: histogram.saturated ( imageStats -- )
 \ count the number of saturated pixels based on the histogram
-	hist.buffer 0x3fffc + @
+	HISTOGRAM 0x3fffc + @
 ;
 
-: histogram-down ( bits -- )
-\ downsample the histogram by bits, 0 <= bits < 16
-\ downsampled histogram is stored in hist.buffer2
-	hist.buffer2 0x40000 erase
-	0x10000 0	( bits end start)
-	DO
-		i over rshift 4* hist.buffer2 +
-		i 4* hist.buffer @
-		swap +!
-	LOOP
-;
+\ : histogram-down ( bits -- )
+\ \ downsample the histogram by bits, 0 <= bits < 16
+\ \ downsampled histogram is stored in hist.buffer2
+\ 	hist.buffer2 0x40000 erase
+\ 	0x10000 0	( bits end start)
+\ 	DO
+\ 		i over rshift 4* hist.buffer2 +
+\ 		i 4* hist.buffer @
+\ 		swap +!
+\ 	LOOP
+\ ;
 
 : combine-images { n x y addr0 | half-n size dest -- }	\ VFX locals
 \ combine n sequential x * y * 16bit monochrome images at located at addr0  

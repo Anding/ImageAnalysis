@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="ImageAnalysis_project.vcxproj" />
+  <Project Path="ImageAnalysis_project.vcxproj" Id="6dec4401-4a54-4f76-9504-9258056b74dc" />
 </Solution>
