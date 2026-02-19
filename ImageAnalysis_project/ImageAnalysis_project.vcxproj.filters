@@ -16,7 +16,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include=".github\copilot-instructions.md" />
-    <None Include="program.asm">
+    <None Include="histogram.asm">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="median.asm">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>

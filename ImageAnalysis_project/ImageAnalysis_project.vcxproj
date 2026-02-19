@@ -128,7 +128,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include=".github\copilot-instructions.md" />
-    <None Include="program.asm" />
+    <None Include="histogram.asm" />
+    <None Include="median.asm" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

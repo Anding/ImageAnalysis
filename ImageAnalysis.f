@@ -14,8 +14,9 @@ END-STRUCTURE
     IMAGE_STATISTICS allocate abort" unable to allocate image statistics" 
 ;
 
-CODE <histogram> ( bitmap histogram n  -- )
-    \ Load pointers: EDX = source, ECX = destination. EBX contains byte count.
+\ internal words in assembly language
+
+CODE <histogram> ( bitmap histogram total_pixels  -- )
     mov     edx, 4 [ebp]            \ source pointer
     mov     ecx, 0 [ebp]            \ histogram pointer    
     test    ebx, ebx                \ check if byte count is zero
@@ -26,7 +27,7 @@ L$1:
     movzx   eax, word 0 [edx]       \ load 16-bit word with zero extend
     inc     dword 0 [ecx] [eax*4]   \ increment the longword at address = ax + ecx
     add     edx, 2                  \ move source pointer forward 2 bytes
-    sub     ebx, 2                  \ decrement byte counter by 2
+    dec     ebx                     \ decrement pixel count by 1
     jmp     L$1                     \ continue loop
 L$2:
     mov ebx, 08 [ebp]               \ move the 3rd stack item to the cached TOS
@@ -34,11 +35,29 @@ L$2:
     NEXT,    
 END-CODE
 
+CODE <median> ( histogram total_pixels -- m )
+    mov     ecx, 0 [ebp]            \ ecx will be the address of the current histogram bin
+    shr     ebx, 1                  \ divide the number of pixels by 2, this is the target we need to reach
+    xor     edx, edx                \ set edx=0, edx will count through the number of histogram bins
+L$1:
+    sub     ebx, dword 0 [ecx]      \ subtract the number of pixels in the current bin from the remaining target
+    jb      L$2                     \ edx contains the median pixel value
+    inc     edx                     \ advance to the next bin
+    add     ecx, 4                  \ advance to the address of the next bin
+    cmp     edx, 0xffff             \ test if edx < 0xffff, i.e. there are still bins remaining
+    jb      L$1           
+    or      edx, -1                 \ set edx=-1 as the return value since the target number of pixels was not reached
+L$2:   
+    mov     ebx, edx                \ return the median on the TOS
+    lea     ebp, 4 [ebp]            \ move the stack pointer up by 1 cells
+    NEXT,     
+END-CODE
+
 : compute-histogram { image imageStats -- }
 \ prepare a full-resolution histogram for an image 
     image IMAGE_BITMAP
 	imageStats HISTOGRAM dup 0x40000 erase
-	image IMAGE_SIZE_BYTES @ dup imageStats TOTAL_PIXELS !
+	image IMAGE_SIZE_BYTES @ 2/ dup imageStats TOTAL_PIXELS !       \ each pixel is 2 bytes
     ( bitmap histogram n ) <histogram> 
 ;
 
@@ -65,26 +84,13 @@ END-CODE
 	imageStats MEAN !
 ;
 
-: histogram.median { histbuffer total_pixels | half_total_pixels cumulative_pixels -- median }
-\ compute the median pixel level based on the histogram
-	total_pixels @ 2/ -> half_total_pixels 
-	zero total_pixels	    				\ now iterate until half the total number of pixels have been counted
-	0 begin
-		dup 4* histbuffer + @				\ num of pixels at this value of the histogram
-		add cumulative_pixels				\ update cumulative pixels
-		cumulative_pixels half_total_pixels <
-	while
-		1+
-	repeat	( median)
-;
-
 : compute-median ( imageStats -- )
-    R> R@ HISTOGRAM R@ TOTAL_PIXELS @ histogram.median 
+    >R R@ HISTOGRAM R@ TOTAL_PIXELS @ <median>
     R> MEDIAN !
 ;
 
 : compute-median_absolute_deviation ( imageStats -- )
-    R> R@ HISTOGRAM_ABSOLUTE_DEVIATION R@ TOTAL_PIXELS @ histogram.median 
+    >R R@ HISTOGRAM_ABSOLUTE_DEVIATION R@ TOTAL_PIXELS @ <median> 
     R> MEDIAN_ABSOLUTE_DEVIATION !
 ;
 

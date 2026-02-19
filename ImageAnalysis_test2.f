@@ -19,3 +19,4 @@ include "%idir%\ImageAnalysis.f"
 make-testXISF -> image
 allocate-imageStats -> imagestats
 image imagestats compute-histogram
+imagestats compute-median
