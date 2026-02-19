@@ -44,12 +44,41 @@ L$1:
     jb      L$2                     \ edx contains the median pixel value
     inc     edx                     \ advance to the next bin
     add     ecx, 4                  \ advance to the address of the next bin
-    cmp     edx, 0xffff             \ test if edx < 0xffff, i.e. there are still bins remaining
+    cmp     edx, 0x10000            \ test if edx < 0x10000, i.e. there are still bins remaining
     jb      L$1           
     or      edx, -1                 \ set edx=-1 as the return value since the target number of pixels was not reached
 L$2:   
-    mov     ebx, edx                \ return the median on the TOS
+    mov     ebx, edx                \ return the median on TOS
     lea     ebp, 4 [ebp]            \ move the stack pointer up by 1 cells
+    NEXT,     
+END-CODE
+
+CODE <mean> ( histogram total_pixels -- m )
+    push    esi                     \ callee save
+    push    edi                     \ callee save
+    push    ebx                     \ save the number of pixels on the stack for the final division operation
+    xor     esi, esi                \ esi will be the hi 32 bits of a 64-bit accumulator
+    xor     edi, edi                \ edi will be the lo 32 bits of a 64-bit accumulator
+    xor     ecx, ecx                \ ecx will be the number of the current histogram bin 0..0xffff
+    mov     ebx, 0 [ebp]            \ ebx will be the address of the current histogram bin
+
+L$1:
+    mov     eax, ecx                \ update eax to the number of the current histogram bin
+    mul     dword 0 [ebx]           \ edx:eax = eax * [ebx], the total pixel intensity represented by this bin
+    add     edi, eax                \ lo 32 bits of a 64-bit addition to the accumulator
+    adc     esi, edx                \ hi 32 bits
+    inc     ecx                     \ advance to the next bin
+    add     ebx, 4                  \ advance to the address of the next bin
+    cmp     ecx, 0x10000            \ test if ecx < 0x10000, i.e. there are still bins remaining
+    jb      L$1             
+    mov     edx, esi                \ move the accumulated pixel intensity to edx:eax
+    mov     eax, edi
+    pop     ebx                     \ reload ebx with the number of pixels
+    div     ebx                     \ after the division eax contains the mean pixel value
+    mov     ebx, eax                \ return the mean on TOS
+    lea     ebp, 4 [ebp]            \ move the stack pointer up by 1 cells  
+    pop     edi                     \ callee restore    
+    pop     esi                     \ callee restore    
     NEXT,     
 END-CODE
 
@@ -61,37 +90,30 @@ END-CODE
     ( bitmap histogram n ) <histogram> 
 ;
 
-: compute-ASBDhistogram { image imageStats | _median -- }
+: compute-ASBDhistogram { image imageStats -- }
 \ prepare a full-resolution histogram of the absolute deviation values of image 
-    imageStats MEDIAN @ -> _median
-	imageStats 0x40000 HISTOGRAM_ABSOLUTE_DEVIATION erase
-	image IMAGE_BITMAP dup imageStats TOTAL_PIXELS @ + swap ( end start)
-	DO
-		i w@ _median - abs
-		4* imageStats HISTOGRAM_ABSOLUTE_DEVIATION + incr
-	2 +LOOP
-;  
+    imageStats MEDIAN @
+ 	imageStats HISTOGRAM_ABSOLUTE_DEVIATION dup 0x40000 erase   
+ 	imageStats TOTAL_PIXELS @
+ 	( median bitmap histogram n) <histogram-ad>
+;   
     
-: compute-mean { imageStats -- }
-\ compute the mean pixel level based on the histogram
-	0 0 ( cumulative_intensity as a double number)
-	0x10000 0 	( end start)
-	DO
-		imageStats i 4* + @	    					    \ num of pixels at this value of the histogram
-		( cumulative_intensity pixels) i um* d+	        \ update cumulative intensity
-	LOOP	
-	( cumulative_intensity) imageStats TOTAL_PIXELS @ UM/MOD nip ( mean)
-	imageStats MEAN !
-;
-
 : compute-median ( imageStats -- )
+\ compute the median and update imageStats
     >R R@ HISTOGRAM R@ TOTAL_PIXELS @ <median>
     R> MEDIAN !
 ;
 
 : compute-median_absolute_deviation ( imageStats -- )
+\ compute the mediam absolute deviation and update imageStats
     >R R@ HISTOGRAM_ABSOLUTE_DEVIATION R@ TOTAL_PIXELS @ <median> 
     R> MEDIAN_ABSOLUTE_DEVIATION !
+;
+
+: compute-mean ( imageStats -- )
+\ compute the mean and update imageStats
+    >R R@ HISTOGRAM R@ TOTAL_PIXELS @ <mean>
+	R> MEAN !
 ;
 
 : initialize-imageStats { image imageStats }

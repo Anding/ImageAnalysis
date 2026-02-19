@@ -1,5 +1,5 @@
 ; EBX will contain the number of pixels in an image
-; [EBP] will contain the address of the histogram (size 0x10000 bytes) prepared by histogram.asm
+; [EBP] will contain the address of the histogram (size 0x40000 bytes) prepared by histogram.asm
 ; the histogram is an array of 32 bit longwords each containing the count of pixels in an image having that respective brighness level
 ; the pixels in an image each have a brightness value 0...0xffff
 ; the first longword counts the number of pixels having a value of zero

@@ -20,3 +20,4 @@ make-testXISF -> image
 allocate-imageStats -> imagestats
 image imagestats compute-histogram
 imagestats compute-median
+imagestats compute-mean

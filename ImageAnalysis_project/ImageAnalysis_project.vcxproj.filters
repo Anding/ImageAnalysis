@@ -22,5 +22,11 @@
     <None Include="median.asm">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="mean.asm">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="histogram-ad.asm">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
