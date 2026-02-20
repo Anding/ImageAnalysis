@@ -5,17 +5,17 @@
 1. Clipping function
 ```
     CLIP(x, s, h) =
-    0           if x < s
-    1           if x > h
-    (x-s)/(h-s) otherwise
+    0               if x < s
+    1               if x > h
+    (x-s)/(h-s)     otherwise
 ```
 2. Midtones transfer function
 ```
-    MID(a, b) =
-    0                            if a = 0
-    1/2                          if a = b
-    1                            if a = 1
-    ((b-1) * a) / ((2b-1)*a - b))  otherwise    
+    MID(x, m) =
+    0                               if x = 0
+    1/2                             if x = m
+    1                               if x = 1
+    ((m-1) * x) / ((2m-1)*x - m))   otherwise    
 ```   
 
 ### Display algorithm
