@@ -1,4 +1,4 @@
-; EBX will contain a number of bytes, n
+; EBX will contain a number of pixels, n.  It is guaranteed that n is greater than zero
 ; [EBP] will contain the address of a buffer of size 0x40000, which is guaranteed to be zero intitialized
 ; [EBP+4] will contain the address of an array of n 16-bit words, each containing an unsigned value 0..0xffff, representing the brightness of a pixel
 ; EAX, ECX, EDX are scratch registers that do not need to be preserved
@@ -15,19 +15,16 @@ _start:
     ; Load pointers: EDX = array of image pixels (16-bit words), ECX = histogram buffer (32-bit longwords). EBX = number of bytes
     mov     edx, [ebp+4]    ; source pointer
     mov     ecx, [ebp]      ; destination pointer
-
-    cmp     ebx, 2              ; check if at least 2 bytes remain (handles ebx=0 too)
-    jb      .done
-
+    test    ebx, ebx        ; check if pixel count is zero
+    jz      .done           ; exit if no pixels to process
 .loop:
     movzx   eax, word [edx]     ; load 16-bit word and zero extend to 32 bits
     inc     dword [ecx + eax*4] ; increment the longword at address = ax + ecx
     
     ; Advance pointers and decrement counter
     add     edx, 2              ; move source pointer forward 2 bytes
-    sub     ebx, 2              ; decrement byte counter by 2
-    cmp     ebx, 2              ; at least one pixel remaining?
-    jae     .loop               ; continue if so
+    dec     ebx                 ; decrement pixel count by 1
+    jnz     .loop               ; continue if ebx > 0
 
 .done:
     ; Exit (Linux int 0x80 syscall)

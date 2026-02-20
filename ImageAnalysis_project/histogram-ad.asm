@@ -1,4 +1,4 @@
-; EBX will contain a number of bytes, n
+; EBX will contain a number of pixels, n
 ; [EBP] will contain the address of a buffer of size 0x40000, which is guaranteed to be zero intitialized
 ; [EBP+4] will contain the address of an image array of n 16-bit words, each containing an unsigned value 0..0xffff, representing the brightness of a pixel
 ; [EBP+8] will contain the median pixel value of the image array (previously calculated)
@@ -19,8 +19,8 @@ _start:
     mov     edi, [ebp+8]        ; median pixel value
     mov     esi, [ebp+4]        ; address of the image array
     mov     ecx, [ebp]          ; pointer to the base of the histogram buffer
-    cmp     ebx, 2              ; check if at least 2 bytes remain (handles ebx=0 too)
-    jb      .done
+    test    ebx, ebx            ; exit if no pixels to process
+    jz      .done
 
 .loop:
     movzx   eax, word [esi]     ; load a 16-bit word from the image buffer and zero extend to 32 bits
@@ -30,9 +30,8 @@ _start:
     sub     eax, edx            ; if negative: add 1  ->  EAX = abs(pixel - median)
     inc     dword [ecx + eax*4] ; increment the histogram bin for this absolute deviation
     add     esi, 2              ; move source pointer forward 2 bytes
-    sub     ebx, 2              ; decrement byte counter by 2
-    cmp     ebx, 2              ; at least one pixel remaining?
-    jae     .loop               ; continue if so
+    dec     ebx                 ; decrement pixel counter
+    jnz     .loop               ; continue if so
     
 .done:
     ; Exit (Linux int 0x80 syscall)

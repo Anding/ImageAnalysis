@@ -19,19 +19,43 @@ END-STRUCTURE
 CODE <histogram> ( bitmap histogram total_pixels  -- )
     mov     edx, 4 [ebp]            \ source pointer
     mov     ecx, 0 [ebp]            \ histogram pointer    
-    test    ebx, ebx                \ check if byte count is zero
+    test    ebx, ebx                \ exit if no pixels to process
     jz      L$2
 L$1:
-    cmp     ebx, 2                  \ check if at least 2 bytes remain
-    jb      L$2
     movzx   eax, word 0 [edx]       \ load 16-bit word with zero extend
     inc     dword 0 [ecx] [eax*4]   \ increment the longword at address = ax + ecx
     add     edx, 2                  \ move source pointer forward 2 bytes
     dec     ebx                     \ decrement pixel count by 1
-    jmp     L$1                     \ continue loop
+    jnz     L$1                     \ continue loop
 L$2:
-    mov ebx, 08 [ebp]               \ move the 3rd stack item to the cached TOS
+    mov ebx, 08 [ebp]               \ move the 2nd stack item to the cached TOS
     lea ebp, 12 [ebp]               \ move the stack pointer up by 3 cells
+    NEXT,    
+END-CODE
+
+CODE <histogram-ad> ( median bitmap histogram total_pixels  -- )
+    push    edi                     \ callee save
+    push    esi                     \ callee save
+    mov     edi, 8 [ebp]            \ median pixel value
+    mov     esi, 4 [ebp]            \ address of the image array (free EDX for CDQ)
+    mov     ecx, 0 [ebp]            \ pointer to the base of the histogram buffer   
+    test    ebx, ebx                \ exit if no pixels to process
+    jz      L$2
+L$1:
+    movzx   eax, word 0 [esi]       \ load 16-bit word with zero extend
+    sub     eax, edi                \ diff = pixel - median; EDX free because ESI holds image pointer
+    cdq                             \ EDX = 0x00000000 if EAX >= 0, 0xFFFFFFFF if EAX < 0
+    xor     eax, edx                \ if negative: flip all EAX bits then add 1, which is binary negate
+    sub     eax, edx                \ if positive these instructions do nothing to eax
+    inc     dword 0 [ecx] [eax*4]   \ increment the histogram bin for this absolute deviation
+    add     esi, 2                  \ move source pointer forward 2 bytes
+    dec     ebx                     \ decrement pixel count by 1
+    jnz     L$1                     \ continue loop
+L$2:
+    pop esi                         \ callee restore
+    pop edi                         \ callee restore
+    mov ebx, 12 [ebp]               \ move the 3rd stack item to the cached TOS
+    lea ebp, 16 [ebp]               \ move the stack pointer up by 4 cells
     NEXT,    
 END-CODE
 
@@ -93,6 +117,7 @@ END-CODE
 : compute-ASBDhistogram { image imageStats -- }
 \ prepare a full-resolution histogram of the absolute deviation values of image 
     imageStats MEDIAN @
+    image IMAGE_BITMAP   
  	imageStats HISTOGRAM_ABSOLUTE_DEVIATION dup 0x40000 erase   
  	imageStats TOTAL_PIXELS @
  	( median bitmap histogram n) <histogram-ad>
@@ -116,28 +141,18 @@ END-CODE
 	R> MEAN !
 ;
 
-: initialize-imageStats { image imageStats }
+: compute-imageStats { image imageStats }
     image imageStats compute-histogram 
     imageStats compute-mean 
     imageStats compute-median
+    image imagestats compute-ASBDhistogram              \ must compute the median first
+    imagestats compute-median_absolute_deviation
 ;
     
 : histogram.saturated ( imageStats -- )
 \ count the number of saturated pixels based on the histogram
 	HISTOGRAM 0x3fffc + @
 ;
-
-\ : histogram-down ( bits -- )
-\ \ downsample the histogram by bits, 0 <= bits < 16
-\ \ downsampled histogram is stored in hist.buffer2
-\ 	hist.buffer2 0x40000 erase
-\ 	0x10000 0	( bits end start)
-\ 	DO
-\ 		i over rshift 4* hist.buffer2 +
-\ 		i 4* hist.buffer @
-\ 		swap +!
-\ 	LOOP
-\ ;
 
 : combine-images { n x y addr0 | half-n size dest -- }	\ VFX locals
 \ combine n sequential x * y * 16bit monochrome images at located at addr0  
@@ -156,4 +171,13 @@ END-CODE
 			( mean) dest i + w!
 	2 +LOOP
 ;
- 
+
+
+\ utility functions
+
+: .imageStats ( imageStats --)
+    cr ." Mean      " dup mean ?
+    cr ." Median    " dup median ? 
+    cr ." Median AD " dup median_absolute_deviation ?
+    drop
+;
