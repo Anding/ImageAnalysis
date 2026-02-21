@@ -41,11 +41,9 @@
 ;  
 
 \ *******************************************************
-\ XISF display functions
+\ XISF display functions, see DisplayFunction.md 
 
-
-
-: df.CLIP { x s h -- xc }
+: CLIP { x s h -- xc }
     x s < if 
         0
     else 
@@ -59,7 +57,39 @@
      then
 ;
 
-: df.MID { x m -- xm }
+CODE <CLIP> ( x s h -- xc )
+\ assembly language version of CLIP
+    push    esi                 \ callee save
+    push    edi                 \ callee save
+                                \ ebx = h
+    mov     esi, 0 [ebp]        \ esi = s
+    mov     edi, 4 [ebp]        \ edi = x
+    cmp     edi, esi            \ fall through if x < s
+    jae     L$1
+    xor     ebx, ebx            \ ebx = 0.0
+    jmp     L$3
+L$1:                            
+    cmp     edi, ebx            \ fall through if x >= h
+    jb      L$2                   
+    mov     ebx, 0x10000        \ ebx = 1.0
+    jmp     L$3                
+L$2:                             
+    mov     eax, edi            \ eax = x
+    sub     eax, esi            \ eax = x-s
+    shl     eax, 16             \ eax = (x-s)*0x10000  (left shift by 16 = multiply by 0x10000)
+                                \ valid since x-s fits in 16 bits (s <= x < h <= 0xffff)
+    xor     edx, edx            \ clear EDX: div uses EDX:EAX as 64-bit dividend
+    sub     ebx, esi            \ ebx = h-s
+    div     ebx                 \ eax = (x-s)/(h-s)
+    mov     ebx, eax            \ ebx = (x-s)/(h-s)
+L$3:                         
+    pop     edi                 \ callee restore
+    pop     esi                 \ callee restore
+    lea ebp, 08 [ebp]           \ move the stack pointer up by 2 cells
+    NEXT,    
+END-CODE
+
+: MID { x m -- xm }
     x 0= if 
         0
     else
@@ -120,16 +150,16 @@
      
      df.a 0= if
         M df.s I- -> df.t
-        df.t df.B df.MID
+        df.t df.B MID
      else
         df.h M I- -> df.t
-        df.B df.t df.MID
+        df.B df.t MID
      then -> df.m   
 ;
 
 : displayScale ( x -- x1)
-    ( x) df.s df.h df.CLIP ( xc)
-    ( xc) df.m df.MID ( xm)
+    ( x) df.s df.h <CLIP> ( xc)
+    ( xc) df.m MID ( xm)
 ;
 
 \ ****************************************************

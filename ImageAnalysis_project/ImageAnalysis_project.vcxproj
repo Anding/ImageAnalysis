@@ -128,6 +128,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include=".github\copilot-instructions.md" />
+    <None Include="clip.asm" />
     <None Include="histogram-ad.asm" />
     <None Include="histogram.asm" />
     <None Include="mean.asm" />
