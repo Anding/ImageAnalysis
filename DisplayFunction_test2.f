@@ -34,5 +34,25 @@ T{ 0 65535 65535 <CLIP> }T 0 65535 65535 CLIP ==
 CR
 Tend
 
+: time-CLIP
+    ticks
+    1000 0 do
+        65535 0 do i 0x2000 0xa000 CLIP drop loop
+    loop
+    ticks swap -
+    cr ." CLIP took (ms) " . 
+;
+
+: time-<CLIP>
+    ticks
+    1000 0 do
+        65535 0 do i 0x2000 0xa000 <CLIP> drop loop
+    loop
+    ticks swap -
+    cr ." <CLIP> took (ms) " .     
+;
+
+time-CLIP
+time-<CLIP>
 
 
