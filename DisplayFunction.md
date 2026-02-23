@@ -17,6 +17,7 @@
     1                               if x = 1
     ((m-1) * x) / ((2m-1)*x - m))   otherwise    
 ```   
+note that the formula is well-behaved and continuous and gives the same results as the special cases
 
 ### Display algorithm
 For each pixel value `x` and using image parameters `m, s, and h`

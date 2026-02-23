@@ -31,5 +31,8 @@
     <None Include="clip.asm">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="mid.asm">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

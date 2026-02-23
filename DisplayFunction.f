@@ -85,7 +85,7 @@ L$2:
 L$3:                         
     pop     edi                 \ callee restore
     pop     esi                 \ callee restore
-    lea ebp, 08 [ebp]           \ move the stack pointer up by 2 cells
+    lea     ebp, 08 [ebp]       \ move the stack pointer up by 2 cells
     NEXT,    
 END-CODE
 
@@ -105,9 +105,39 @@ END-CODE
                 m I-
                 I/
              then
-         then
+        then
      then
 ;
+
+CODE <MID> ( x m -- xm )
+\ assembly language version of MID
+    push    esi                 \ callee save
+    push    edi                 \ callee save
+                                \ ebx = m
+    mov     edi, 0 [ebp]        \ edi = x
+    \ compute the denominator
+    mov     ecx, ebx            \ ecx = m
+    shl     ecx, 1              \ ecx = 2*m
+    sub     ecx, 0x10000        \ ecx = 2*m - 1.0, recall 1.0 = 0x10000
+    mov     eax, edi            \ eax = x
+    imul    ecx                 \ edx:eax = (2m-1) * x  (signed: 2m-1 is negative when m < 0.5)
+    shrd    eax, edx, 16        \ remove the scale factor
+    sub     eax, ebx            \ eax = (2m-1)*x - m
+    mov     ecx, eax            \ ecx = (2m-1)*x - m
+    \ compute the numerator     \
+    mov     esi, ebx            \ esi = m
+    sub     esi, 0x10000        \ esi = m - 0x10000  (m-1 in fixed point; negative since m < 1)
+    mov     eax, edi            \ eax = x
+    imul    esi                 \ edx:eax = (m-1)*x
+    \ shr/shl by 0x10000 cancel: keep raw product as numerator for the division
+    \ perform the division
+    idiv    ecx                 \ eax = (m-1)*x / (2m-1)*x - m
+    mov     ebx, eax            \ ebx = result      
+    pop     edi                 \ callee restore
+    pop     esi                 \ callee restore
+    lea     ebp, 04 [ebp]       \ move the stack pointer up by 1 cell
+    NEXT,    
+END-CODE
 
 1.4826E    FtoI constant  1.48I
 -2.80E     FtoI constant -2.80I

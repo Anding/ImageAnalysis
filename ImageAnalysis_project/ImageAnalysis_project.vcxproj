@@ -133,6 +133,7 @@
     <None Include="histogram.asm" />
     <None Include="mean.asm" />
     <None Include="median.asm" />
+    <None Include="mid.asm" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
