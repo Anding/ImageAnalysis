@@ -57,13 +57,8 @@
      then
 ;
 
-CODE <CLIP> ( s h x -- xc )
-\ assembly language version of CLIP
-    push    esi                 \ callee save
-    push    edi                 \ callee save
-                                \ ebx = x
-    mov     esi, 0 [ebp]        \ esi = h
-    mov     edi, 4 [ebp]        \ edi = s
+LBL: <<CLIP>> ( ebx = x, esi = h edi = s, return in ebx)
+\ assembly language subroutine for CLIP
     cmp     ebx, edi            \ fall through if x < s
     jae     L$1
     xor     ebx, ebx            \ ebx = 0.0
@@ -82,7 +77,18 @@ L$2:
     sub     esi, edi            \ ebx = h-s
     div     esi                 \ eax = (x-s)/(h-s)
     mov     ebx, eax            \ ebx = (x-s)/(h-s)
-L$3:                         
+L$3:     
+    ret
+END-CODE
+
+CODE <CLIP> ( s h x -- xc )
+\ assembly language version of CLIP
+    push    esi                 \ callee save
+    push    edi                 \ callee save
+                                \ ebx = x
+    mov     esi, 0 [ebp]        \ esi = h
+    mov     edi, 4 [ebp]        \ edi = s
+    call     <<CLIP>>                 
     pop     edi                 \ callee restore
     pop     esi                 \ callee restore
     lea     ebp, 08 [ebp]       \ move the stack pointer up by 2 cells
@@ -109,12 +115,7 @@ END-CODE
      then
 ;
 
-CODE <MID> ( m x -- xm )
-\ assembly language version of MID
-    push    esi                 \ callee save
-    push    edi                 \ callee save
-                                \ ebx = x
-    mov     edi, 0 [ebp]        \ edi = m
+LBL: <<MID>> ( ebx = x, edi = m, return in ebx)
     \ compute the denominator
     mov     ecx, edi            \ ecx = m
     shl     ecx, 1              \ ecx = 2*m
@@ -132,7 +133,17 @@ CODE <MID> ( m x -- xm )
     \ shr/shl by 0x10000 cancel: keep raw product as numerator for the division
     \ perform the division
     idiv    ecx                 \ eax = (m-1)*x / (2m-1)*x - m
-    mov     ebx, eax            \ ebx = result      
+    mov     ebx, eax            \ ebx = result          
+    ret
+END-CODE
+
+CODE <MID> ( m x -- xm )
+\ assembly language version of MID
+    push    esi                 \ callee save
+    push    edi                 \ callee save
+                                \ ebx = x
+    mov     edi, 0 [ebp]        \ edi = m
+    call     <<MID>>
     pop     edi                 \ callee restore
     pop     esi                 \ callee restore
     lea     ebp, 04 [ebp]       \ move the stack pointer up by 1 cell
@@ -205,5 +216,7 @@ END-CODE
     ." t    " df.t . cr
     ." m    " df.m . cr
 ;
+
+
     
     

@@ -30,7 +30,7 @@ Tstart
 T{ 0 65535 0 <CLIP> }T 0 65535 0 CLIP == 
 T{ 0 65535 65535 <CLIP> }T 0 65535 65535 CLIP ==   
 \ spot checks
-98 do-tests
+ 98 do-tests
 CR
 Tend
 
@@ -52,7 +52,7 @@ Tend
     cr ." <CLIP> took (ms) " .     
 ;
 
-time-CLIP
-time-<CLIP>
+ time-CLIP
+ time-<CLIP>
 
 
