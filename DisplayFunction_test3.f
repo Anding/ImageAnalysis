@@ -17,9 +17,9 @@ include "%idir%/DisplayFunction.f"
 ;
 
 : do-tests ( n --)
-    0 do
-     cr T{ random2 9 emit x1 . x2 .
-     x1 x2 <MID> x1 x2 MID test }T 0 ==
+    0 do \ cr
+        T{ random2 \ 9 emit x1 . x2 .
+        x1 x2 <MID> x1 x2 MID test }T 0 ==
     loop
 ;
    

@@ -43,12 +43,12 @@
 \ *******************************************************
 \ XISF display functions, see DisplayFunction.md 
 
-: CLIP { x s h -- xc }
+: CLIP { s h x -- xc }
     x s < if 
         0
     else 
         x h > if 
-            1.00I
+            1.00I 1- \ ~1.0
         else
             x s I- 
             h s I-
@@ -57,30 +57,30 @@
      then
 ;
 
-CODE <CLIP> ( x s h -- xc )
+CODE <CLIP> ( s h x -- xc )
 \ assembly language version of CLIP
     push    esi                 \ callee save
     push    edi                 \ callee save
-                                \ ebx = h
-    mov     esi, 0 [ebp]        \ esi = s
-    mov     edi, 4 [ebp]        \ edi = x
-    cmp     edi, esi            \ fall through if x < s
+                                \ ebx = x
+    mov     esi, 0 [ebp]        \ esi = h
+    mov     edi, 4 [ebp]        \ edi = s
+    cmp     ebx, edi            \ fall through if x < s
     jae     L$1
     xor     ebx, ebx            \ ebx = 0.0
     jmp     L$3
 L$1:                            
-    cmp     edi, ebx            \ fall through if x >= h
-    jb      L$2                   
-    mov     ebx, 0x10000        \ ebx = 1.0
+    cmp     ebx, esi            \ fall through if x > h
+    jbe      L$2                   
+    mov     ebx, 0xffff         \ ebx ~ 1.0
     jmp     L$3                
 L$2:                             
-    mov     eax, edi            \ eax = x
-    sub     eax, esi            \ eax = x-s
+    mov     eax, ebx            \ eax = x
+    sub     eax, edi            \ eax = x-s
     shl     eax, 16             \ eax = (x-s)*0x10000  (left shift by 16 = multiply by 0x10000)
                                 \ valid since x-s fits in 16 bits (s <= x < h <= 0xffff)
     xor     edx, edx            \ clear EDX: div uses EDX:EAX as 64-bit dividend
-    sub     ebx, esi            \ ebx = h-s
-    div     ebx                 \ eax = (x-s)/(h-s)
+    sub     esi, edi            \ ebx = h-s
+    div     esi                 \ eax = (x-s)/(h-s)
     mov     ebx, eax            \ ebx = (x-s)/(h-s)
 L$3:                         
     pop     edi                 \ callee restore
@@ -89,7 +89,7 @@ L$3:
     NEXT,    
 END-CODE
 
-: MID { x m -- xm }
+: MID { m x -- xm }
     x 0= if 
         0
     else
@@ -109,25 +109,25 @@ END-CODE
      then
 ;
 
-CODE <MID> ( x m -- xm )
+CODE <MID> ( m x -- xm )
 \ assembly language version of MID
     push    esi                 \ callee save
     push    edi                 \ callee save
-                                \ ebx = m
-    mov     edi, 0 [ebp]        \ edi = x
+                                \ ebx = x
+    mov     edi, 0 [ebp]        \ edi = m
     \ compute the denominator
-    mov     ecx, ebx            \ ecx = m
+    mov     ecx, edi            \ ecx = m
     shl     ecx, 1              \ ecx = 2*m
     sub     ecx, 0x10000        \ ecx = 2*m - 1.0, recall 1.0 = 0x10000
-    mov     eax, edi            \ eax = x
+    mov     eax, ebx            \ eax = x
     imul    ecx                 \ edx:eax = (2m-1) * x  (signed: 2m-1 is negative when m < 0.5)
     shrd    eax, edx, 16        \ remove the scale factor
-    sub     eax, ebx            \ eax = (2m-1)*x - m
+    sub     eax, edi            \ eax = (2m-1)*x - m
     mov     ecx, eax            \ ecx = (2m-1)*x - m
     \ compute the numerator     \
-    mov     esi, ebx            \ esi = m
+    mov     esi, edi            \ esi = m
     sub     esi, 0x10000        \ esi = m - 0x10000  (m-1 in fixed point; negative since m < 1)
-    mov     eax, edi            \ eax = x
+    mov     eax, ebx            \ eax = x
     imul    esi                 \ edx:eax = (m-1)*x
     \ shr/shl by 0x10000 cancel: keep raw product as numerator for the division
     \ perform the division
@@ -180,16 +180,16 @@ END-CODE
      
      df.a 0= if
         M df.s I- -> df.t
-        df.t df.B MID
+        df.B df.t MID
      else
         df.h M I- -> df.t
-        df.B df.t MID
+        df.t df.B MID
      then -> df.m   
 ;
 
 : displayScale ( x -- x1)
-    ( x) df.s df.h <CLIP> ( xc)
-    ( xc) df.m MID ( xm)
+    ( x ) df.s df.h rot CLIP ( xc)
+    ( xc) df.m swap MID ( xm)
 ;
 
 \ ****************************************************

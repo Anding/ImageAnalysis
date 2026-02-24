@@ -4,14 +4,14 @@
 
 1. Clipping function
 ```
-    CLIP(x, s, h) =
+    CLIP(s, h, x) =
     0               if x < s
     1               if x > h
     (x-s)/(h-s)     otherwise
 ```
 2. Midtones transfer function
 ```
-    MID(x, m) =
+    MID(m, x) =
     0                               if x = 0
     1/2                             if x = m
     1                               if x = 1
@@ -22,9 +22,9 @@ note that the formula is well-behaved and continuous and gives the same results 
 ### Display algorithm
 For each pixel value `x` and using image parameters `m, s, and h`
 
-1. compute `xc = CLIP(x, s, h)`
+1. compute `xc = CLIP(s, h, x)`
 
-2. compute `xm = MID(xc, m)`
+2. compute `xm = MID(m, xc)`
     
 3. plot the pixel using value `xm`
 

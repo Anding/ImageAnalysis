@@ -25,9 +25,9 @@ _start:
     xor     ebx, ebx            ; ebx = 0.0
     jmp     .done 
 .l1:
-    cmp     edi, ebx            ; fall through if x >= h
-    jb      .l2
-    mov     ebx, 0x10000        ; ebx = 1.0
+    cmp     edi, ebx            ; fall through if x > h
+    jbe      .l2
+    mov     ebx, 0xffff         ; ebx ~ 1.0
     jmp     .done
 .l2:
     mov     eax, edi            ; eax = x
