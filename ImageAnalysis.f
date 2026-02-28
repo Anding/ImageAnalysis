@@ -1,7 +1,7 @@
 \ astronomical image analysis in Forth
 need ForthXISF
 
-BEGIN-STRUCTURE IMAGE_STATISTICS
+BEGIN-STRUCTURE <IMAGE_STATISTICS>
     0x40000 +FIELD HISTOGRAM                        \ one 32 bit cell for each 16 bit brightness value
     0x40000 +FIELD HISTOGRAM_ABSOLUTE_DEVIATION     \ histogram of the absolute deviations of the pixels from the median
           4 +FIELD TOTAL_PIXELS
@@ -11,7 +11,7 @@ BEGIN-STRUCTURE IMAGE_STATISTICS
 END-STRUCTURE
 
 : allocate-imageStats ( -- imageStats)
-    IMAGE_STATISTICS allocate abort" unable to allocate image statistics" 
+    <IMAGE_STATISTICS> allocate abort" unable to allocate image statistics" 
 ;
 
 \ internal words in assembly language
@@ -106,16 +106,18 @@ L$1:
     NEXT,     
 END-CODE
 
-: compute-histogram { image imageStats -- }
+: compute-histogram { image | imageStats -- }
 \ prepare a full-resolution histogram for an image 
+    image IMAGE_STATISTICS @ -> imageStats
     image IMAGE_BITMAP
 	imageStats HISTOGRAM dup 0x40000 erase
 	image IMAGE_SIZE_BYTES @ 2/ dup imageStats TOTAL_PIXELS !       \ each pixel is 2 bytes
     ( bitmap histogram n ) <histogram> 
 ;
 
-: compute-ASBDhistogram { image imageStats -- }
+: compute-ASBDhistogram { image | imageStats -- }
 \ prepare a full-resolution histogram of the absolute deviation values of image 
+    image IMAGE_STATISTICS @ -> imageStats
     imageStats MEDIAN @
     image IMAGE_BITMAP   
  	imageStats HISTOGRAM_ABSOLUTE_DEVIATION dup 0x40000 erase   
@@ -141,11 +143,12 @@ END-CODE
 	R> MEAN !
 ;
 
-: compute-imageStats { image imageStats }
-    image imageStats compute-histogram 
+: compute-imageStats { image | imageStats }
+    allocate-imageStats dup -> imageStats image IMAGE_STATISTICS !
+    image compute-histogram 
     imageStats compute-mean 
     imageStats compute-median
-    image imagestats compute-ASBDhistogram              \ must compute the median first
+    image compute-ASBDhistogram              \ must compute the median first
     imagestats compute-median_absolute_deviation
 ;
     
@@ -175,7 +178,8 @@ END-CODE
 
 \ utility functions
 
-: .imageStats ( imageStats --)
+: .imageStats ( image --)
+    IMAGE_STATISTICS @
     cr ." Mean      " dup mean ?
     cr ." Median    " dup median ? 
     cr ." Median AD " dup median_absolute_deviation ?

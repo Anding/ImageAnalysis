@@ -1,7 +1,6 @@
 include "%idir%\ImageAnalysis.f"
 
 0 value image
-0 value imagestats
 
 : make-testXISF { | map img -- img }
     640 480 1 allocate-image -> img
@@ -39,28 +38,27 @@ include "%idir%\ImageAnalysis.f"
 ;   
 
 make-testXISF -> image
-allocate-imageStats -> imagestats
 
 cr
 cr ." zero image"
-image imagestats compute-imageStats
-imagestats .imageStats
+image compute-imageStats
+image .imageStats
 cr
 
 cr ." constant image"
 image make-constant
-image imagestats compute-imageStats
-imagestats .imageStats
+image compute-imageStats
+image .imageStats
 cr
 
 cr ." binary image"
 image make-binary
-image imagestats compute-imageStats
-imagestats .imageStats
+image compute-imageStats
+image .imageStats
 cr
 
 cr ." random image"
 image make-random
-image imagestats compute-imageStats
-imagestats .imageStats
+image compute-imageStats
+image .imageStats
 cr
