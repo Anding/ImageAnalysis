@@ -143,6 +143,16 @@ END-CODE
 	R> MEAN !
 ;
 
+: add-ImageAnalysisFITS { image | imageStats map -- }
+\ add key value pairs for FITS observation parameters
+    image IMAGE_STATISTICS @ -> imageStats
+    image FITS_MAP @ -> map
+	s"  "                                       map =>" #STATS"         \ a header to indicate the source of these FITS values	
+    imageStats MEAN @ (.)                       map =>" MEAN"
+    imageStats MEDIAN @ (.)                     map =>" MEDIAN"
+    imageStats MEDIAN_ABSOLUTE_DEVIATION @ (.)  map =>" MEDIANAD"    
+;
+
 : compute-imageStats { image | imageStats }
     allocate-imageStats dup -> imageStats image IMAGE_STATISTICS !
     image compute-histogram 
@@ -150,6 +160,7 @@ END-CODE
     imageStats compute-median
     image compute-ASBDhistogram              \ must compute the median first
     imagestats compute-median_absolute_deviation
+    image add-ImageAnalysisFITS
 ;
     
 : histogram.saturated ( imageStats -- )
@@ -175,13 +186,12 @@ END-CODE
 	2 +LOOP
 ;
 
-
 \ utility functions
 
 : .imageStats ( image --)
     IMAGE_STATISTICS @
     cr ." Mean      " dup mean ?
     cr ." Median    " dup median ? 
-    cr ." Median AD " dup median_absolute_deviation ?
+    cr ." MedianAD  " dup median_absolute_deviation ?
     drop
 ;
