@@ -152,69 +152,78 @@ END-CODE
 
 1.4826E    FtoI constant  1.48I
 -2.80E     FtoI constant -2.80I
-0.25I   value df.B
--2.80I  value df.C
-0       value df.MADN
-0       value df.a
-0       value df.t
-0       value df.s
-0       value df.h
-0       value df.m
 
-: compute-display_parameters { M MAD | -- }
-    MAD 1.48I I* -> df.MADN
-    M 0.50I > if 1.00I else 0 then -> df.a
+: compute-display_parameters { ist | -- }
+\ take an imageStats buffer and complete the display function parameters
+    0.25I ist df.B !
+    -2.80I ist df.C !
+    ist MEDIAN_ABSOLUTE_DEVIATION @ 1.48I I* ist df.MADN !
+    ist MEDIAN @ 0.50I > if 1.00I else 0 then ist df.a !
     
-    df.a 1.00I = if 
+    ist df.a @ 1.00I = if 
         0 
     else
-        df.MADN 0= if
+        ist df.MADN @ 0= if
             0
         else
-            M df.C df.MADN I* I+
+            ist MEDIAN @ ist df.C @ ist df.MADN @ I* I+
             0 max
             1.00I min
          then
-     then -> df.s
+     then ist df.s !
      
-     df.a 0= if
+     ist df.a @ 0= if
         1.00I
      else
-        df.MADN 0= if
+        ist df.MADN @ 0= if
             1.00I
         else
-            M df.C df.MADN I* I-
+            ist MEDIAN @ ist df.C @ ist df.MADN @ I* I-
             0 max
             1.00I min
         then
-     then -> df.h
+     then ist df.h !
      
-     df.a 0= if
-        M df.s I- -> df.t
-        df.B df.t MID
+     ist df.a @ 0= if
+        ist MEDIAN @ ist df.s @ I- ist df.t !
+        ist df.B @ ist df.t @ MID
      else
-        df.h M I- -> df.t
-        df.t df.B MID
-     then -> df.m   
+        ist df.h MEDIAN @ I- ist df.t !
+        ist df.t @ ist df.B @ MID
+     then ist df.m !  
 ;
 
-: displayScale ( x -- x1)
-    ( x ) df.s df.h rot CLIP ( xc)
-    ( xc) df.m swap MID ( xm)
+: apply-displayFunction { imgSrc imgDst | s h m src dst -- }
+\ apply the display function
+\ assumes that image stistics are already computed for imgSrc
+\  and that imgDst is already allocated
+    imgSrc IMAGE_STATISTICS @ compute-display_parameters
+    imgSrc IMAGE_STATISTICS @ df.s @ -> s
+    imgSrc IMAGE_STATISTICS @ df.h @ -> h
+    imgSrc IMAGE_STATISTICS @ df.m @ -> m
+    imgSrc IMAGE_BITMAP -> src
+    imgDst IMAGE_BITMAP -> dst
+    imgSrc IMAGE_STATISTICS @ TOTAL_PIXELS @ 0 do
+        s h src w@ CLIP m swap MID
+        dst w!
+        src 2 + -> src
+        dst 2 + -> dst
+    loop
 ;
 
 \ ****************************************************
 \ utility functions
 
-: .display_parameters
-    ." MADN " df.MADN . cr 
-    ." B    " df.B . cr
-    ." C    " df.C . cr
-    ." a    " df.a . cr
-    ." s    " df.s . cr
-    ." h    " df.h . cr
-    ." t    " df.t . cr
-    ." m    " df.m . cr
+: .display_parameters ( imageStats)
+    ." MADN " dup df.MADN @ . cr 
+    ." B    " dup df.B @ . cr
+    ." C    " dup df.C @ . cr
+    ." a    " dup df.a @ . cr
+    ." s    " dup df.s @ . cr
+    ." h    " dup df.h @ . cr
+    ." t    " dup df.t @ . cr
+    ." m    " dup df.m @ . cr  
+    drop
 ;
 
 

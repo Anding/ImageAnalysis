@@ -8,6 +8,14 @@ BEGIN-STRUCTURE <IMAGE_STATISTICS>
           4 +FIELD MEAN
           4 +FIELD MEDIAN
           4 +FIELD MEDIAN_ABSOLUTE_DEVIATION
+          4 +FIELD df.B                             \ display function parameters
+          4 +FIELD df.C 
+          4 +FIELD df.MADN
+          4 +FIELD df.a
+          4 +FIELD df.t
+          4 +FIELD df.s
+          4 +FIELD df.h
+          4 +FIELD df.m          
 END-STRUCTURE
 
 : allocate-imageStats ( -- imageStats)

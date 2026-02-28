@@ -1,4 +1,5 @@
 \ test the equivalence of CLIP and <CLIP> 
+need ImageAnalysis
 need simple-tester 
 include "%idir%/DisplayFunction.f"    
   

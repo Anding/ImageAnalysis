@@ -1,4 +1,5 @@
 \ test the equivalence of MID and <MID> 
+need ImageAnalysis
 need simple-tester 
 include "%idir%/DisplayFunction.f"    
   
