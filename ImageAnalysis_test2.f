@@ -1,4 +1,4 @@
-include "%idir%\ImageAnalysis.f"
+need ImageAnalysis
 
 0 value image
 

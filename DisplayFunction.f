@@ -91,7 +91,7 @@ CODE <CLIP> ( s h x -- xc )
     call     <<CLIP>>                 
     pop     edi                 \ callee restore
     pop     esi                 \ callee restore
-    lea     ebp, 08 [ebp]       \ move the stack pointer up by 2 cells
+    lea     ebp, 08 [ebp]       \ move the stack pointer up by 2 cells, return value in ebx
     NEXT,    
 END-CODE
 
@@ -146,14 +146,14 @@ CODE <MID> ( m x -- xm )
     call     <<MID>>
     pop     edi                 \ callee restore
     pop     esi                 \ callee restore
-    lea     ebp, 04 [ebp]       \ move the stack pointer up by 1 cell
+    lea     ebp, 04 [ebp]       \ move the stack pointer up by 1 cell, return value in ebx
     NEXT,    
 END-CODE
 
 1.4826E    FtoI constant  1.48I
 -2.80E     FtoI constant -2.80I
 
-: compute-display_parameters { ist | -- }
+: compute-displayParameters { ist -- }
 \ take an imageStats buffer and complete the display function parameters
     0.25I ist df.B !
     -2.80I ist df.C !
@@ -193,22 +193,51 @@ END-CODE
      then ist df.m !  
 ;
 
-: apply-displayFunction { imgSrc imgDst | s h m src dst -- }
+CODE <apply-displayFunction> ( s h m src dest pixels --)
+    push    esi
+    push    edi
+    mov     ecx, ebx                \ ecx contains the pixel count
+    mov     edx,  0 [ebp]           \ edx contains the dest
+    mov     eax,  4 [ebp]           \ eax contains the src
+L$1:
+    test    ecx, ecx                \ check if byte count is zero
+    jz      L$2
+    movzx   ebx, word 0 [eax]       \ ebx contains x0
+    push    edx
+    push    eax
+    push    ecx    
+    mov     esi, 12 [ebp]           \ esi contains h
+    mov     edi, 16 [ebp]           \ edi contains s 
+    call    <<CLIP>>                \ ebx contains x1
+    mov     edi,  8 [ebp]           \ edi contains m
+    call    <<MID>>                 \ ebx contains x2
+    pop     ecx
+    pop     eax
+    pop     edx
+    mov     word 0 [edx], ebx   
+    dec     ecx
+    add     edx, 2
+    add     eax, 2  
+    jmp     L$1
+L$2:
+    pop     edi
+    pop     esi
+    mov     ebx, 20 [ebp]           \ move the below stack item to TOS register since there is no return value
+    lea     ebp, 24 [ebp]           \ move the stack pointer up by 6 cells
+    NEXT,
+END-CODE
+
+: apply-displayFunction { imgSrc imgDst -- }
 \ apply the display function
-\ assumes that image stistics are already computed for imgSrc
-\  and that imgDst is already allocated
-    imgSrc IMAGE_STATISTICS @ compute-display_parameters
-    imgSrc IMAGE_STATISTICS @ df.s @ -> s
-    imgSrc IMAGE_STATISTICS @ df.h @ -> h
-    imgSrc IMAGE_STATISTICS @ df.m @ -> m
-    imgSrc IMAGE_BITMAP -> src
-    imgDst IMAGE_BITMAP -> dst
-    imgSrc IMAGE_STATISTICS @ TOTAL_PIXELS @ 0 do
-        s h src w@ CLIP m swap MID
-        dst w!
-        src 2 + -> src
-        dst 2 + -> dst
-    loop
+\ assumes that image stistics are already computed for imgSrc and that imgDst is already allocated
+    imgSrc IMAGE_STATISTICS @ compute-displayParameters
+    imgSrc IMAGE_STATISTICS @ df.s @ 
+    imgSrc IMAGE_STATISTICS @ df.h @
+    imgSrc IMAGE_STATISTICS @ df.m @
+    imgSrc IMAGE_BITMAP
+    imgDst IMAGE_BITMAP
+    imgSrc IMAGE_STATISTICS @ TOTAL_PIXELS @
+    ( s h m src dest pixels --) <apply-displayFunction>
 ;
 
 \ ****************************************************

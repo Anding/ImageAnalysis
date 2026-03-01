@@ -1,7 +1,6 @@
 \ test the equivalence of MID and <MID> 
 need ImageAnalysis
 need simple-tester 
-include "%idir%/DisplayFunction.f"    
   
 0 value x1
 0 value x2

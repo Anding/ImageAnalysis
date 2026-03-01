@@ -201,5 +201,13 @@ END-CODE
     cr ." Mean      " dup mean ?
     cr ." Median    " dup median ? 
     cr ." MedianAD  " dup median_absolute_deviation ?
+    cr ." DF B      " dup df.B ?                             
+    cr ." DF C      " dup df.C ? 
+    cr ." DF MADN   " dup df.MADN ?
+    cr ." DF a      " dup df.a ?
+    cr ." DF t      " dup df.t ?
+    cr ." DF s      " dup df.s ?
+    cr ." DF h      " dup df.h ?
+    cr ." DF m      " dup df.m ?
     drop
 ;
