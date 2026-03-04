@@ -62,3 +62,6 @@ image make-random
 image compute-imageStats
 image .imageStats
 cr
+
+cr ." save histogram to a raw file"
+image save-Histogram
