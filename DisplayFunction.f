@@ -227,17 +227,22 @@ L$2:
     NEXT,
 END-CODE
 
-: apply-displayFunction { imgSrc imgDst -- }
-\ apply the display function
-\ assumes that image stistics are already computed for imgSrc and that imgDst is already allocated
+: apply-displayFunction-to { imgSrc bitmap -- }
+\ apply the display function to an allocated 16-bit destination bitmap
     imgSrc IMAGE_STATISTICS @ compute-displayParameters
     imgSrc IMAGE_STATISTICS @ df.s @ 
     imgSrc IMAGE_STATISTICS @ df.h @
     imgSrc IMAGE_STATISTICS @ df.m @
     imgSrc IMAGE_BITMAP
-    imgDst IMAGE_BITMAP
+    bitmap
     imgSrc IMAGE_STATISTICS @ TOTAL_PIXELS @
     ( s h m src dest pixels --) <apply-displayFunction>
+;
+
+: apply-displayFunction { imgSrc imgDst -- }
+\ preserve the established image-context destination interface
+    imgDst IMAGE_BITMAP
+    imgSrc swap apply-displayFunction-to
 ;
 
 \ ****************************************************

@@ -26,10 +26,14 @@ DEFER write-HISTfilepath ( map buf --)
     fileid close-file ( IOR)
 ;
 
+: save-Histogram-to { img filepath-buffer -- }
+    filepath-buffer create-imageDirectory
+    img IMAGE_STATISTICS @ HISTOGRAM
+    filepath-buffer buffer-to-string drop
+    ( bitmap width height caddr) SaveHistogramAsBinary abort" Error writing histogram file"
+;
+
 : save-Histogram { img -- }
 	img initialize-HISTfilepath
-	img RAW_FILEPATH_BUFFER create-imageDirectory
-    img IMAGE_STATISTICS @ HISTOGRAM
-    img RAW_FILEPATH_BUFFER buffer-to-string drop
-    ( bitmap width height caddr) SaveHistogramAsBinary abort" Error writing histogram file"
+    img img RAW_FILEPATH_BUFFER save-Histogram-to
 ;
