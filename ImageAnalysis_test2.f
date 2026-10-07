@@ -1,6 +1,8 @@
 need ImageAnalysis
+need simple-tester
 
 0 value image
+FILEPATH_SIZE allocate-buffer constant histogram.test.path
 
 : make-testXISF { | map img -- img }
     640 480 1 allocate-frame -> img
@@ -39,29 +41,23 @@ need ImageAnalysis
 
 make-testXISF -> image
 
-cr
-cr ." zero image"
 image compute-imageStats
-image .imageStats
-cr
 
-cr ." constant image"
 image make-constant
 image compute-imageStats
-image .imageStats
-cr
 
-cr ." binary image"
-image make-binary
-image compute-imageStats
-image .imageStats
-cr
+histogram.test.path reset-buffer
+s" E:\Coding\ImageAnalysis\testdata\" histogram.test.path write-buffer drop
+histogram.test.path buffer-punctuate-filepath
+s" histogram.bin" histogram.test.path write-buffer drop
+image histogram.test.path save-Histogram-to
 
-cr ." random image"
-image make-random
-image compute-imageStats
-image .imageStats
-cr
+Tstart
+T{ image FRAME_STATISTICS @ TOTAL_PIXELS @ }T 640 480 * ==
+T{ image FRAME_STATISTICS @ MEAN @ }T 32768 ==
+T{ image FRAME_STATISTICS @ MEDIAN @ }T 32768 ==
+T{ histogram.test.path buffer-to-string FileExists? }T -1 ==
+Tend
 
-cr ." save histogram to a raw file"
-image save-Histogram
+image free-frame
+bye

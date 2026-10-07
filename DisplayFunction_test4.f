@@ -1,28 +1,47 @@
-need ImageAnalysis
+\ Full-frame display-function integration with explicit XISF output.
+
+NEED ImageAnalysis
+NEED ForthImageLoaders
+NEED simple-tester
 
 0 value img1
 0 value img2
+FILEPATH_SIZE allocate-buffer constant display.test.path
 
-: test_write-XISFfilepath { map buf -- }
-	s" E:\testdata\images\" buf write-buffer drop
-	buf buffer-punctuate-filepath
-	s" displayfunction1.xisf" buf write-buffer drop 
+: display.make-frame { | frame map -- frame }
+    640 480 1 allocate-frame -> frame
+    frame FRAME_METADATA @ -> map
+    s" 16" map =>" BITPIX"
+    s" 2" map =>" NAXIS"
+    s" 640" map =>" NAXIS1"
+    s" 480" map =>" NAXIS2"
+    s" UInt16" map =>" SMPLFRMT"
+    s" Gray" map =>" COLORSPC"
+    s" Light" map =>" IMAGETYP"
+    s" 0" map =>" OFFSET"
+    s" display-test" map =>" UUID"
+    640 480 * 0 do
+        i 257 * 0x10000 mod frame FRAME_BITMAP i 2* + w!
+    loop
+    frame
 ;
 
-cr cr ." load XISF text image"
-s" E:\testdata\images\LUM-E14-F5100-900080d4354b.xisf" xisf.load-file drop -> img1
-img1 xisf.spawn -> img2
+display.make-frame -> img1
+img1 FRAME_WIDTH @ img1 FRAME_HEIGHT @ img1 FRAME_DEPTH @ allocate-frame -> img2
 
-cr ." compute image statistics and display parameters"
 img1 compute-imageStats
+img1 img2 apply-displayFunction
 
-cr ." run display function... "
-ticks
-img1 img2 apply-displayFunction    \ 141ms in pure assembly; 516 ms in all Forth, 218 ms with assembly subroutines in a Forth loop
-ticks swap -
-. ."  ms "               
+display.test.path reset-buffer
+s" E:\testdata\images\" display.test.path write-buffer drop
+display.test.path buffer-punctuate-filepath
+s" displayfunction1.xisf" display.test.path write-buffer drop
+img2 display.test.path save-XISFimage-to
 
-img1 .imageStats
+Tstart
+T{ display.test.path buffer-to-string FileExists? }T -1 ==
+Tend
 
-ASSIGN test_write-XISFfilepath TO-DO write-XISFfilepath
-img2 save-XISFimage
+img1 free-frame
+img2 free-frame
+bye
