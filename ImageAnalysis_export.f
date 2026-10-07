@@ -1,23 +1,4 @@
-\ export histogram as a binary file
-
-DEFER write-HISTfilepath ( map buf --)
-
-: default_write-HISTfilepath { map buf -- }
-	s" e:\images\snapshot\" buf write-buffer drop	
-	buf buffer-punctuate-filepath
-	s" hist.raw" buf write-buffer drop
-	0 buf echo-buffer drop                                   \ zero terminated string
-;
-
-    ASSIGN default_write-HISTfilepath TO-DO write-HISTfilepath
-    
-: initialize-HISTfilepath ( img --)
-	>R
-	R@ FITS_MAP @ ( map)
-	R> RAW_FILEPATH_BUFFER                                   \ reuse the RAW filpath
-	FILEPATH_SIZE over ( map buf FILEPATH_SIZE buf) declare-buffer
-	( map buf) write-HISTfilepath
-;
+\ Export a histogram at an explicit destination.
 
 : SaveHistogramAsBinary { histogram zaddr | fileid -- IOR }
     zaddr zcount delete-file drop
@@ -26,14 +7,9 @@ DEFER write-HISTfilepath ( map buf --)
     fileid close-file ( IOR)
 ;
 
-: save-Histogram-to { img filepath-buffer -- }
+: save-Histogram-to { frame filepath-buffer -- }
     filepath-buffer create-imageDirectory
-    img IMAGE_STATISTICS @ HISTOGRAM
+    frame FRAME_STATISTICS @ HISTOGRAM
     filepath-buffer buffer-to-string drop
     ( bitmap width height caddr) SaveHistogramAsBinary abort" Error writing histogram file"
-;
-
-: save-Histogram { img -- }
-	img initialize-HISTfilepath
-    img img RAW_FILEPATH_BUFFER save-Histogram-to
 ;

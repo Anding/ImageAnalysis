@@ -229,19 +229,19 @@ END-CODE
 
 : apply-displayFunction-to { imgSrc bitmap -- }
 \ apply the display function to an allocated 16-bit destination bitmap
-    imgSrc IMAGE_STATISTICS @ compute-displayParameters
-    imgSrc IMAGE_STATISTICS @ df.s @ 
-    imgSrc IMAGE_STATISTICS @ df.h @
-    imgSrc IMAGE_STATISTICS @ df.m @
-    imgSrc IMAGE_BITMAP
+    imgSrc FRAME_STATISTICS @ compute-displayParameters
+    imgSrc FRAME_STATISTICS @ df.s @
+    imgSrc FRAME_STATISTICS @ df.h @
+    imgSrc FRAME_STATISTICS @ df.m @
+    imgSrc FRAME_BITMAP
     bitmap
-    imgSrc IMAGE_STATISTICS @ TOTAL_PIXELS @
+    imgSrc FRAME_STATISTICS @ TOTAL_PIXELS @
     ( s h m src dest pixels --) <apply-displayFunction>
 ;
 
 : apply-displayFunction { imgSrc imgDst -- }
 \ preserve the established image-context destination interface
-    imgDst IMAGE_BITMAP
+    imgDst FRAME_BITMAP
     imgSrc swap apply-displayFunction-to
 ;
 

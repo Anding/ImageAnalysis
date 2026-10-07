@@ -3,8 +3,8 @@ need ImageAnalysis
 0 value image
 
 : make-testXISF { | map img -- img }
-    640 480 1 allocate-image -> img
-    img FITS_MAP @ -> map
+    640 480 1 allocate-frame -> img
+    img FRAME_METADATA @ -> map
     s" 16" map =>" BITPIX"	
     s" 2"	map =>" NAXIS"	
     s" 640" map =>" NAXIS1"
@@ -15,7 +15,7 @@ need ImageAnalysis
 : make-random ( image --)
     >R
     640 480 * 0 do
-        0x10000 choose j ( loop obscures R@) IMAGE_BITMAP i 2* + w!   \ random 16 bit words
+        0x10000 choose j ( loop obscures R@) FRAME_BITMAP i 2* + w!   \ random 16 bit words
     loop   
     R> drop
 ;
@@ -23,7 +23,7 @@ need ImageAnalysis
 : make-constant ( image --)
     >R
     640 480 * 0 do
-        0x8000 j ( loop obscures R@) IMAGE_BITMAP i 2* + w!   \ random 16 bit words
+        0x8000 j ( loop obscures R@) FRAME_BITMAP i 2* + w!   \ random 16 bit words
     loop   
     R> drop
 ;   
@@ -32,7 +32,7 @@ need ImageAnalysis
     >R
     640 480 * 0 do
         i 1 and if 0x5000 else 0xb000 then  \ alternate 0 and -1
-        j ( loop obscures R@) IMAGE_BITMAP i 2* + w!   \ random 16 bit words
+        j ( loop obscures R@) FRAME_BITMAP i 2* + w!   \ random 16 bit words
     loop   
     R> drop
 ;   

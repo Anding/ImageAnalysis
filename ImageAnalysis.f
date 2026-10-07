@@ -1,7 +1,7 @@
 \ astronomical image analysis in Forth
-need ForthXISF
+need ForthAstroFormats
 
-BEGIN-STRUCTURE <IMAGE_STATISTICS>
+BEGIN-STRUCTURE <FRAME_STATISTICS>
     0x40000 +FIELD HISTOGRAM                        \ one 32 bit cell for each 16 bit brightness value
     0x40000 +FIELD HISTOGRAM_ABSOLUTE_DEVIATION     \ histogram of the absolute deviations of the pixels from the median
           4 +FIELD TOTAL_PIXELS
@@ -18,8 +18,8 @@ BEGIN-STRUCTURE <IMAGE_STATISTICS>
           4 +FIELD df.m          
 END-STRUCTURE
 
-: allocate-imageStats ( -- imageStats)
-    <IMAGE_STATISTICS> allocate abort" unable to allocate image statistics" 
+: allocate-frameStats ( -- imageStats)
+    <FRAME_STATISTICS> allocate abort" unable to allocate image statistics"
 ;
 
 \ internal words in assembly language
@@ -116,22 +116,22 @@ END-CODE
 
 : compute-histogram { image | imageStats -- }
 \ prepare a full-resolution histogram for an image 
-    image IMAGE_STATISTICS @ -> imageStats
-    image IMAGE_BITMAP
+    image FRAME_STATISTICS @ -> imageStats
+    image FRAME_BITMAP
 	imageStats HISTOGRAM dup 0x40000 erase
-	image IMAGE_SIZE_BYTES @ 2/ dup imageStats TOTAL_PIXELS !       \ each pixel is 2 bytes
+	image FRAME_SIZE_BYTES @ 2/ dup imageStats TOTAL_PIXELS !       \ each pixel is 2 bytes
     ( bitmap histogram n ) <histogram> 
 ;
 
 : compute-ASBDhistogram { image | imageStats -- }
 \ prepare a full-resolution histogram of the absolute deviation values of image 
-    image IMAGE_STATISTICS @ -> imageStats
+    image FRAME_STATISTICS @ -> imageStats
     imageStats MEDIAN @
-    image IMAGE_BITMAP   
- 	imageStats HISTOGRAM_ABSOLUTE_DEVIATION dup 0x40000 erase   
+    image FRAME_BITMAP
+	imageStats HISTOGRAM_ABSOLUTE_DEVIATION dup 0x40000 erase
  	imageStats TOTAL_PIXELS @
  	( median bitmap histogram n) <histogram-ad>
-;   
+;
     
 : compute-median ( imageStats -- )
 \ compute the median and update imageStats
@@ -153,8 +153,8 @@ END-CODE
 
 : add-ImageAnalysisFITS { image | imageStats map -- }
 \ add key value pairs for FITS observation parameters
-    image IMAGE_STATISTICS @ -> imageStats
-    image FITS_MAP @ -> map
+    image FRAME_STATISTICS @ -> imageStats
+    image FRAME_METADATA @ -> map
 	s"  "                                       map =>" #STATS"         \ a header to indicate the source of these FITS values	
     imageStats MEAN @ (.)                       map =>" MEAN"
     imageStats MEDIAN @ (.)                     map =>" MEDIAN"
@@ -162,7 +162,7 @@ END-CODE
 ;
 
 : compute-imageStats { image | imageStats }
-    allocate-imageStats dup -> imageStats image IMAGE_STATISTICS !
+    allocate-frameStats dup -> imageStats image FRAME_STATISTICS !
     image compute-histogram 
     imageStats compute-mean 
     imageStats compute-median
@@ -197,7 +197,7 @@ END-CODE
 \ utility functions
 
 : .imageStats ( image --)
-    IMAGE_STATISTICS @
+    FRAME_STATISTICS @
     cr ." Mean      " dup mean ?
     cr ." Median    " dup median ? 
     cr ." MedianAD  " dup median_absolute_deviation ?
