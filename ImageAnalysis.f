@@ -162,6 +162,8 @@ END-CODE
 ;
 
 : compute-imageStats { image | imageStats }
+    image FRAME_STATISTICS @ ?dup if free throw then
+    0 image FRAME_STATISTICS !
     allocate-frameStats dup -> imageStats image FRAME_STATISTICS !
     image compute-histogram 
     imageStats compute-mean 
@@ -189,7 +191,6 @@ END-CODE
 				+						\ update the cumulative
 			LOOP
 			half-n + n /			\ adding half-n rounds rather than truncates using integer arithmetic
-			dup .
 			( mean) dest i + w!
 	2 +LOOP
 ;
