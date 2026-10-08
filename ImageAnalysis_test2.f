@@ -27,6 +27,7 @@ FILEPATH_SIZE allocate-buffer constant histogram.test.path
     640 480 * 0 do
         0x8000 j ( loop obscures R@) FRAME_BITMAP i 2* + w!   \ random 16 bit words
     loop   
+    0xffff R@ FRAME_BITMAP 640 480 * 1- 2* + w!
     R> drop
 ;   
 
@@ -56,6 +57,8 @@ Tstart
 T{ image FRAME_STATISTICS @ TOTAL_PIXELS @ }T 640 480 * ==
 T{ image FRAME_STATISTICS @ MEAN @ }T 32768 ==
 T{ image FRAME_STATISTICS @ MEDIAN @ }T 32768 ==
+T{ image FRAME_STATISTICS @ histogram.saturated }T 1 ==
+T{ s" SATPIX" image FRAME_METADATA @ >string hashS }T s" 1" hashS ==
 T{ histogram.test.path buffer-to-string FileExists? }T -1 ==
 Tend
 

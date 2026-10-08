@@ -151,6 +151,11 @@ END-CODE
 	R> MEAN !
 ;
 
+: histogram.saturated ( imageStats -- count )
+\ count the pixels in the saturated 16-bit histogram bin
+	HISTOGRAM 0x3fffc + @
+;
+
 : add-ImageAnalysisFITS { image | imageStats map -- }
 \ add key value pairs for FITS observation parameters
     image FRAME_STATISTICS @ -> imageStats
@@ -158,7 +163,8 @@ END-CODE
 	s"  "                                       map =>" #STATS"         \ a header to indicate the source of these FITS values	
     imageStats MEAN @ (.)                       map =>" MEAN"
     imageStats MEDIAN @ (.)                     map =>" MEDIAN"
-    imageStats MEDIAN_ABSOLUTE_DEVIATION @ (.)  map =>" MEDIANAD"    
+    imageStats MEDIAN_ABSOLUTE_DEVIATION @ (.)  map =>" MEDIANAD"
+    imageStats histogram.saturated (.)           map =>" SATPIX"
 ;
 
 : compute-imageStats { image | imageStats }
@@ -171,11 +177,6 @@ END-CODE
     image compute-ASBDhistogram              \ must compute the median first
     imagestats compute-median_absolute_deviation
     image add-ImageAnalysisFITS
-;
-    
-: histogram.saturated ( imageStats -- )
-\ count the number of saturated pixels based on the histogram
-	HISTOGRAM 0x3fffc + @
 ;
 
 : combine-images { n x y addr0 | half-n size dest -- }	\ VFX locals
