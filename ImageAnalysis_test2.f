@@ -4,6 +4,17 @@ need simple-tester
 0 value image
 FILEPATH_SIZE allocate-buffer constant histogram.test.path
 
+: histogram.test-write-filepath
+    { frame suffix-addr suffix-u filepath-buffer -- }
+    frame drop
+    filepath-buffer reset-buffer
+    s" E:\Coding\ImageAnalysis\testdata\histogram"
+        filepath-buffer write-buffer drop
+    suffix-addr suffix-u filepath-buffer write-buffer drop
+;
+
+ASSIGN histogram.test-write-filepath TO-DO write-filepath
+
 : make-testXISF { | map img -- img }
     640 480 1 allocate-frame -> img
     img FRAME_METADATA @ -> map
@@ -47,11 +58,7 @@ image compute-imageStats
 image make-constant
 image compute-imageStats
 
-histogram.test.path reset-buffer
-s" E:\Coding\ImageAnalysis\testdata\" histogram.test.path write-buffer drop
-histogram.test.path buffer-punctuate-filepath
-s" histogram.bin" histogram.test.path write-buffer drop
-image histogram.test.path save-Histogram-to
+image histogram.test.path save-Histogram
 
 Tstart
 T{ image FRAME_STATISTICS @ TOTAL_PIXELS @ }T 640 480 * ==

@@ -1,16 +1,9 @@
-\ Export a histogram at an explicit destination.
+\ Export an image histogram through the active binary filepath policy.
 
-: SaveHistogramAsBinary { histogram zaddr | fileid -- IOR }
+NEED ForthPublication
+
+: save-Histogram { frame filepath-buffer -- }
 \ Histograms contain 65536 four-byte bins, hence the fixed 0x40000-byte file.
-    zaddr zcount delete-file drop
-    zaddr zcount w/o create-file if -1 exit then -> fileid
-    histogram 0x40000 fileid write-file drop
-    fileid close-file ( IOR)
-;
-
-: save-Histogram-to { frame filepath-buffer -- }
-    filepath-buffer create-imageDirectory
-    frame FRAME_STATISTICS @ HISTOGRAM
-    filepath-buffer buffer-to-string drop
-    ( bitmap width height caddr) SaveHistogramAsBinary abort" Error writing histogram file"
+    frame frame FRAME_STATISTICS @ HISTOGRAM 0x40000 filepath-buffer
+        save-binary-file
 ;
