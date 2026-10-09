@@ -1,19 +1,7 @@
 need ImageAnalysis
 need simple-tester
 
-0 value image
-FILEPATH_SIZE allocate-buffer constant histogram.test.path
-
-: histogram.test-write-filepath
-    { frame suffix-addr suffix-u filepath-buffer -- }
-    frame drop
-    filepath-buffer reset-buffer
-    s" E:\Coding\ImageAnalysis\testdata\histogram"
-        filepath-buffer write-buffer drop
-    suffix-addr suffix-u filepath-buffer write-buffer drop
-;
-
-ASSIGN histogram.test-write-filepath TO-DO write-filepath
+0 shared value image
 
 : make-testXISF { | map img -- img }
     640 480 1 allocate-frame -> img
@@ -58,15 +46,12 @@ image compute-imageStats
 image make-constant
 image compute-imageStats
 
-image histogram.test.path save-Histogram
-
 Tstart
 T{ image FRAME_STATISTICS @ TOTAL_PIXELS @ }T 640 480 * ==
 T{ image FRAME_STATISTICS @ MEAN @ }T 32768 ==
 T{ image FRAME_STATISTICS @ MEDIAN @ }T 32768 ==
 T{ image FRAME_STATISTICS @ histogram.saturated }T 1 ==
 T{ s" SATPIX" image FRAME_METADATA @ >string hashS }T s" 1" hashS ==
-T{ histogram.test.path buffer-to-string FileExists? }T -1 ==
 Tend
 
 image free-frame

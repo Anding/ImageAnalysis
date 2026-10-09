@@ -1,6 +1,7 @@
 need imageAnalysis
+need ForthXISF
 
-0 value image
+0 shared value image
 cr
 
 cr ." load XISF text image"
