@@ -51,6 +51,8 @@ static void test_detection_and_measurement(void)
     int status;
     uint32_t i;
     IAStar *center_star = NULL;
+    IAStar locked;
+    IAStar measured;
 
     CHECK(image != NULL && workspace != NULL, "allocate synthetic test buffers");
     if (image == NULL || workspace == NULL) {
@@ -94,6 +96,14 @@ static void test_detection_and_measurement(void)
         CHECK(center_star->fwhm_milli_pixels > 4300 &&
               center_star->fwhm_milli_pixels < 5200, "Gaussian-equivalent FWHM");
         CHECK(center_star->ellipticity_milli < 50, "round-star ellipticity");
+        locked = *center_star;
+        locked.x_milli += 2000;
+        locked.y_milli -= 2000;
+        status = IA_MeasureLockedStars(
+            image, WIDTH, HEIGHT, WIDTH, &config, &locked, 1u, 4u, &measured);
+        CHECK(status == IA_OK, "remeasure locked star");
+        CHECK(abs(measured.x_milli - 70250) < 150, "relocate locked star x");
+        CHECK(abs(measured.y_milli - 50750) < 150, "relocate locked star y");
     }
 
     free(workspace);
@@ -123,11 +133,100 @@ static void test_calculations(void)
         "ideal ROI bounds");
 }
 
+static int32_t piecewise_metric(
+    int32_t focus,
+    int32_t center,
+    int32_t baseline,
+    int32_t left_slope,
+    int32_t right_slope)
+{
+    int32_t distance = focus - center;
+    int32_t slope = distance < 0 ? left_slope : right_slope;
+    if (distance < 0) distance = -distance;
+    return baseline + (int32_t)((int64_t)distance * slope / IA_MILLI);
+}
+
+static int32_t hyperbola_metric(
+    int32_t focus,
+    int32_t center,
+    int32_t baseline,
+    int32_t radius,
+    int32_t slope)
+{
+    double distance = focus - center;
+    double scaled = distance * slope / IA_MILLI;
+    return baseline + (int32_t)(sqrt((double)radius * radius + scaled * scaled) + 0.5);
+}
+
+static void test_focus_fitting(void)
+{
+    IAFocusSample samples[11];
+    IAFocusModel model;
+    IAFocusFit fits[3];
+    IAFocusSummary summary;
+    int32_t workspace[3];
+    uint32_t i;
+    int status;
+
+    memset(&model, 0, sizeof(model));
+    model.struct_size = sizeof(model);
+    model.kind = IA_FOCUS_PIECEWISE_V;
+    model.baseline_milli = 3000;
+    model.left_slope_micro_per_step = 38000;
+    model.right_slope_micro_per_step = 42000;
+    for (i = 0u; i < 11u; ++i) {
+        samples[i].focus_position = 4900 + (int32_t)i * 20;
+        samples[i].metric_milli = piecewise_metric(
+            samples[i].focus_position, 5037, 3250, 38000, 42000);
+        samples[i].weight_milli = IA_MILLI;
+        samples[i].flags = 0u;
+    }
+    fits[0].struct_size = sizeof(fits[0]);
+    status = IA_FitFocusModel(&model, samples, 11u, 0u, 250u, &fits[0]);
+    CHECK(status == IA_OK, "fit piecewise focus model");
+    CHECK(abs(fits[0].focus_milli_steps - 5037000) <= 250,
+        "piecewise focus position");
+    CHECK(fits[0].rms_residual_milli <= 10, "piecewise residual");
+    CHECK(fits[0].points_left > 0u && fits[0].points_right > 0u,
+        "piecewise bracket geometry");
+
+    model.kind = IA_FOCUS_HYPERBOLA;
+    model.baseline_milli = 500;
+    model.hyperbola_radius_milli = 2200;
+    model.hyperbola_slope_micro_per_step = 45000;
+    for (i = 0u; i < 11u; ++i) {
+        samples[i].metric_milli = hyperbola_metric(
+            samples[i].focus_position, 5026, 700,
+            model.hyperbola_radius_milli,
+            model.hyperbola_slope_micro_per_step);
+    }
+    fits[1].struct_size = sizeof(fits[1]);
+    status = IA_FitFocusModel(&model, samples, 11u, 0u, 250u, &fits[1]);
+    CHECK(status == IA_OK, "fit hyperbolic focus model");
+    CHECK(abs(fits[1].focus_milli_steps - 5026000) <= 250,
+        "hyperbolic focus position");
+    CHECK(fits[1].rms_residual_milli <= 10, "hyperbolic residual");
+
+    fits[2] = fits[1];
+    fits[0].focus_milli_steps = 5025000;
+    fits[1].focus_milli_steps = 5026000;
+    fits[2].focus_milli_steps = 5099000;
+    fits[2].flags = IA_FOCUS_AT_BOUNDARY;
+    summary.struct_size = sizeof(summary);
+    status = IA_CombineFocusFits(
+        fits, 3u, IA_FOCUS_AT_BOUNDARY, workspace, sizeof(workspace), &summary);
+    CHECK(status == IA_OK, "combine focus fits");
+    CHECK(summary.fits_included == 2u, "exclude flagged focus fit");
+    CHECK(summary.median_focus_milli_steps == 5025500, "combined focus median");
+    CHECK(summary.mad_focus_milli_steps == 500, "combined focus MAD");
+}
+
 int main(void)
 {
     CHECK(IA_Version() == IA_API_VERSION, "API version");
     test_detection_and_measurement();
     test_calculations();
+    test_focus_fitting();
     if (failures != 0) {
         fprintf(stderr, "%d native image-analysis test(s) failed\n", failures);
         return 1;

@@ -33,6 +33,18 @@ enum IAStarFlags {
     IA_STAR_LOW_SNR = 1u << 4
 };
 
+enum IAFocusModelKind {
+    IA_FOCUS_PIECEWISE_V = 1,
+    IA_FOCUS_HYPERBOLA = 2
+};
+
+enum IAFocusFitFlags {
+    IA_FOCUS_INSUFFICIENT_POINTS = 1u << 0,
+    IA_FOCUS_ONE_SIDED = 1u << 1,
+    IA_FOCUS_AT_BOUNDARY = 1u << 2,
+    IA_FOCUS_INVALID_MODEL = 1u << 3
+};
+
 typedef struct IAConfig {
     uint32_t struct_size;
     uint32_t detection_sigma_milli;
@@ -98,6 +110,42 @@ typedef struct IARect {
     int32_t height;
 } IARect;
 
+typedef struct IAFocusModel {
+    uint32_t struct_size;
+    uint32_t kind;
+    int32_t baseline_milli;
+    int32_t left_slope_micro_per_step;
+    int32_t right_slope_micro_per_step;
+    int32_t hyperbola_radius_milli;
+    int32_t hyperbola_slope_micro_per_step;
+} IAFocusModel;
+
+typedef struct IAFocusSample {
+    int32_t focus_position;
+    int32_t metric_milli;
+    uint32_t weight_milli;
+    uint32_t flags;
+} IAFocusSample;
+
+typedef struct IAFocusFit {
+    uint32_t struct_size;
+    int32_t focus_milli_steps;
+    int32_t vertical_offset_milli;
+    int32_t rms_residual_milli;
+    uint32_t points_used;
+    uint32_t points_left;
+    uint32_t points_right;
+    uint32_t flags;
+} IAFocusFit;
+
+typedef struct IAFocusSummary {
+    uint32_t struct_size;
+    uint32_t fits_included;
+    int32_t median_focus_milli_steps;
+    int32_t mad_focus_milli_steps;
+    int32_t median_rms_residual_milli;
+} IAFocusSummary;
+
 IA_EXPORT uint32_t IA_CALL IA_Version(void);
 IA_EXPORT void IA_CALL IA_DefaultConfig(IAConfig *config);
 IA_EXPORT uint32_t IA_CALL IA_WorkspaceBytes(uint32_t maximum_stars);
@@ -122,6 +170,17 @@ IA_EXPORT int IA_CALL IA_SummarizeStars(
     uint32_t workspace_bytes,
     IAFrameSummary *summary);
 
+IA_EXPORT int IA_CALL IA_MeasureLockedStars(
+    const uint16_t *pixels,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels,
+    const IAConfig *config,
+    const IAStar *locked_stars,
+    uint32_t star_count,
+    uint32_t search_radius_pixels,
+    IAStar *measurements);
+
 IA_EXPORT int IA_CALL IA_RecommendExposure(
     uint32_t current_milliseconds,
     uint32_t measured_peak_adu,
@@ -139,6 +198,22 @@ IA_EXPORT int IA_CALL IA_ComputeStarROI(
     uint32_t image_height,
     uint32_t margin_pixels,
     IARect *roi);
+
+IA_EXPORT int IA_CALL IA_FitFocusModel(
+    const IAFocusModel *model,
+    const IAFocusSample *samples,
+    uint32_t sample_count,
+    uint32_t reject_sample_flags,
+    uint32_t resolution_milli_steps,
+    IAFocusFit *fit);
+
+IA_EXPORT int IA_CALL IA_CombineFocusFits(
+    const IAFocusFit *fits,
+    uint32_t fit_count,
+    uint32_t reject_fit_flags,
+    void *workspace,
+    uint32_t workspace_bytes,
+    IAFocusSummary *summary);
 
 #ifdef __cplusplus
 }
