@@ -1,6 +1,286 @@
 \ astronomical image analysis in Forth
 need ForthAstroFormats
 
+LIBRARY: ImageAnalysisNative.dll
+Extern: int "C" IA_Version() ;
+Extern: void "C" IA_DefaultConfig( int * config ) ;
+Extern: int "C" IA_WorkspaceBytes( int maximum_stars ) ;
+Extern: int "C" IA_AnalyzeFrame(
+    int * pixels, int width, int height, int stride_pixels,
+    int * config, int * workspace, int workspace_bytes,
+    int * stars, int star_capacity, int * summary
+) ;
+Extern: int "C" IA_SummarizeStars(
+    int * stars, int star_count, int reject_flags,
+    int * workspace, int workspace_bytes, int * summary
+) ;
+Extern: int "C" IA_MeasureLockedStars(
+    int * pixels, int width, int height, int stride_pixels,
+    int * config, int * locked_stars, int star_count,
+    int search_radius_pixels, int * measurements
+) ;
+Extern: int "C" IA_RecommendExposure(
+    int current_milliseconds, int measured_peak_adu, int background_adu,
+    int target_peak_adu, int minimum_milliseconds, int maximum_milliseconds,
+    int maximum_change_milli, int * recommended_milliseconds
+) ;
+Extern: int "C" IA_ComputeStarROI(
+    int * stars, int star_count, int image_width, int image_height,
+    int margin_pixels, int * roi
+) ;
+Extern: int "C" IA_FitFocusModel(
+    int * model, int * samples, int sample_count, int reject_sample_flags,
+    int resolution_milli_steps, int * fit
+) ;
+Extern: int "C" IA_CombineFocusFits(
+    int * fits, int fit_count, int reject_fit_flags,
+    int * workspace, int workspace_bytes, int * summary
+) ;
+
+0  constant IA.OK
+-3 constant IA.NO_STARS
+
+1  constant IA.STAR.SATURATED
+2  constant IA.STAR.EDGE
+4  constant IA.STAR.BLENDED
+8  constant IA.STAR.TOO_SMALL
+16 constant IA.STAR.LOW_SNR
+
+BEGIN-STRUCTURE <IA_CONFIG>
+    4 +FIELD IA_CONFIG.struct_size
+    4 +FIELD IA_CONFIG.detection_sigma_milli
+    4 +FIELD IA_CONFIG.minimum_threshold_adu
+    4 +FIELD IA_CONFIG.saturation_adu
+    4 +FIELD IA_CONFIG.minimum_area_pixels
+    4 +FIELD IA_CONFIG.minimum_separation_pixels
+    4 +FIELD IA_CONFIG.aperture_radius_pixels
+    4 +FIELD IA_CONFIG.annulus_inner_radius_pixels
+    4 +FIELD IA_CONFIG.annulus_outer_radius_pixels
+    4 +FIELD IA_CONFIG.minimum_snr_milli
+    4 +FIELD IA_CONFIG.blend_minimum_contrast_milli
+END-STRUCTURE
+
+BEGIN-STRUCTURE <IA_STAR>
+    4 +FIELD IA_STAR.struct_size
+    4 +FIELD IA_STAR.x_milli
+    4 +FIELD IA_STAR.y_milli
+    4 +FIELD IA_STAR.flux_adu
+    4 +FIELD IA_STAR.peak_adu
+    4 +FIELD IA_STAR.saturated_pixels
+    4 +FIELD IA_STAR.background_milli_adu
+    4 +FIELD IA_STAR.noise_milli_adu
+    4 +FIELD IA_STAR.snr_milli
+    4 +FIELD IA_STAR.hfr_milli_pixels
+    4 +FIELD IA_STAR.hfd_milli_pixels
+    4 +FIELD IA_STAR.fwhm_milli_pixels
+    4 +FIELD IA_STAR.sigma_major_milli_pixels
+    4 +FIELD IA_STAR.sigma_minor_milli_pixels
+    4 +FIELD IA_STAR.ellipticity_milli
+    4 +FIELD IA_STAR.theta_millidegrees
+    4 +FIELD IA_STAR.positive_pixels
+    4 +FIELD IA_STAR.left
+    4 +FIELD IA_STAR.top
+    4 +FIELD IA_STAR.right
+    4 +FIELD IA_STAR.bottom
+    4 +FIELD IA_STAR.flags
+END-STRUCTURE
+
+BEGIN-STRUCTURE <IA_FRAME_SUMMARY>
+    4 +FIELD IA_FRAME_SUMMARY.struct_size
+    4 +FIELD IA_FRAME_SUMMARY.detected_stars
+    4 +FIELD IA_FRAME_SUMMARY.measured_stars
+    4 +FIELD IA_FRAME_SUMMARY.included_stars
+    4 +FIELD IA_FRAME_SUMMARY.saturated_stars
+    4 +FIELD IA_FRAME_SUMMARY.edge_stars
+    4 +FIELD IA_FRAME_SUMMARY.blended_stars
+    4 +FIELD IA_FRAME_SUMMARY.low_snr_stars
+    4 +FIELD IA_FRAME_SUMMARY.background_milli_adu
+    4 +FIELD IA_FRAME_SUMMARY.noise_milli_adu
+    4 +FIELD IA_FRAME_SUMMARY.detection_threshold_adu
+    4 +FIELD IA_FRAME_SUMMARY.median_hfd_milli_pixels
+    4 +FIELD IA_FRAME_SUMMARY.mad_hfd_milli_pixels
+    4 +FIELD IA_FRAME_SUMMARY.median_fwhm_milli_pixels
+    4 +FIELD IA_FRAME_SUMMARY.mad_fwhm_milli_pixels
+    4 +FIELD IA_FRAME_SUMMARY.median_ellipticity_milli
+    4 +FIELD IA_FRAME_SUMMARY.median_snr_milli
+END-STRUCTURE
+
+BEGIN-STRUCTURE <IA_RECT>
+    4 +FIELD IA_RECT.x
+    4 +FIELD IA_RECT.y
+    4 +FIELD IA_RECT.width
+    4 +FIELD IA_RECT.height
+END-STRUCTURE
+
+1 constant IA.FOCUS.PIECEWISE_V
+2 constant IA.FOCUS.HYPERBOLA
+
+1 constant IA.FOCUS.INSUFFICIENT_POINTS
+2 constant IA.FOCUS.ONE_SIDED
+4 constant IA.FOCUS.AT_BOUNDARY
+8 constant IA.FOCUS.INVALID_MODEL
+
+BEGIN-STRUCTURE <IA_FOCUS_MODEL>
+    4 +FIELD IA_FOCUS_MODEL.struct_size
+    4 +FIELD IA_FOCUS_MODEL.kind
+    4 +FIELD IA_FOCUS_MODEL.baseline_milli
+    4 +FIELD IA_FOCUS_MODEL.left_slope_micro_per_step
+    4 +FIELD IA_FOCUS_MODEL.right_slope_micro_per_step
+    4 +FIELD IA_FOCUS_MODEL.hyperbola_radius_milli
+    4 +FIELD IA_FOCUS_MODEL.hyperbola_slope_micro_per_step
+END-STRUCTURE
+
+BEGIN-STRUCTURE <IA_FOCUS_SAMPLE>
+    4 +FIELD IA_FOCUS_SAMPLE.focus_position
+    4 +FIELD IA_FOCUS_SAMPLE.metric_milli
+    4 +FIELD IA_FOCUS_SAMPLE.weight_milli
+    4 +FIELD IA_FOCUS_SAMPLE.flags
+END-STRUCTURE
+
+BEGIN-STRUCTURE <IA_FOCUS_FIT>
+    4 +FIELD IA_FOCUS_FIT.struct_size
+    4 +FIELD IA_FOCUS_FIT.focus_milli_steps
+    4 +FIELD IA_FOCUS_FIT.vertical_offset_milli
+    4 +FIELD IA_FOCUS_FIT.rms_residual_milli
+    4 +FIELD IA_FOCUS_FIT.points_used
+    4 +FIELD IA_FOCUS_FIT.points_left
+    4 +FIELD IA_FOCUS_FIT.points_right
+    4 +FIELD IA_FOCUS_FIT.flags
+END-STRUCTURE
+
+BEGIN-STRUCTURE <IA_FOCUS_SUMMARY>
+    4 +FIELD IA_FOCUS_SUMMARY.struct_size
+    4 +FIELD IA_FOCUS_SUMMARY.fits_included
+    4 +FIELD IA_FOCUS_SUMMARY.median_focus_milli_steps
+    4 +FIELD IA_FOCUS_SUMMARY.mad_focus_milli_steps
+    4 +FIELD IA_FOCUS_SUMMARY.median_rms_residual_milli
+END-STRUCTURE
+
+256 constant IA.MAX_STARS
+create ia.config <IA_CONFIG> allot
+create ia.summary <IA_FRAME_SUMMARY> allot
+IA.MAX_STARS IA_WorkspaceBytes constant ia.workspace.bytes
+ia.workspace.bytes allocate throw constant ia.workspace
+<IA_STAR> IA.MAX_STARS * allocate throw constant ia.stars
+
+IA.STAR.SATURATED IA.STAR.EDGE or
+IA.STAR.BLENDED or IA.STAR.TOO_SMALL or IA.STAR.LOW_SNR or
+value ia.reject-flags
+32 value ia.summary-stars
+
+ia.config IA_DefaultConfig
+
+: ia.star ( index -- star )
+    <IA_STAR> * ia.stars +
+;
+
+: ia.milli$ ( n -- caddr u )
+\ Format a signed value scaled by 1000 with exactly three decimal places.
+    dup >R abs 0 <# # # # '.' hold #s R> sign #>
+;
+
+: ia.summarize ( reject-flags -- status )
+    ia.stars
+    ia.summary IA_FRAME_SUMMARY.measured_stars @ ia.summary-stars min
+    rot
+    ia.workspace
+    ia.workspace.bytes
+    ia.summary
+    IA_SummarizeStars
+;
+
+: ia.measure-locked { img locked count search-radius results -- status }
+    img FRAME_BITMAP
+    img FRAME_WIDTH @
+    img FRAME_HEIGHT @
+    img FRAME_WIDTH @
+    ia.config
+    locked
+    count
+    search-radius
+    results
+    IA_MeasureLockedStars
+;
+
+variable ia.recommended-exposure
+
+: ia.recommend-exposure
+    { current-ms peak background target min-ms max-ms max-change-milli
+      -- recommended-ms status }
+    current-ms peak background target min-ms max-ms max-change-milli
+    ia.recommended-exposure
+    IA_RecommendExposure
+    ia.recommended-exposure @ swap
+;
+
+create ia.roi <IA_RECT> allot
+
+: ia.compute-roi
+    { stars count image-width image-height margin -- roi status }
+    stars count image-width image-height margin ia.roi
+    IA_ComputeStarROI
+    ia.roi swap
+;
+
+: ia.fit-focus
+    { model samples count reject-flags resolution fit -- status }
+    <IA_FOCUS_FIT> fit IA_FOCUS_FIT.struct_size !
+    model samples count reject-flags resolution fit IA_FitFocusModel
+;
+
+: ia.combine-focus
+    { fits count reject-flags summary -- status }
+    <IA_FOCUS_SUMMARY> summary IA_FOCUS_SUMMARY.struct_size !
+    fits count reject-flags ia.workspace ia.workspace.bytes summary
+    IA_CombineFocusFits
+;
+
+: ia.add-FITS { img | map -- }
+    img FRAME_METADATA @ -> map
+    s"  " map =>" #STARS"
+    ia.summary IA_FRAME_SUMMARY.detected_stars @ (.) map =>" NDETECT"
+    ia.summary IA_FRAME_SUMMARY.included_stars @ (.) map =>" NSTARS"
+    ia.summary IA_FRAME_SUMMARY.included_stars @ if
+        ia.summary IA_FRAME_SUMMARY.median_hfd_milli_pixels @
+            ia.milli$ map =>" HFD"
+        ia.summary IA_FRAME_SUMMARY.mad_hfd_milli_pixels @
+            ia.milli$ map =>" HFDMAD"
+        ia.summary IA_FRAME_SUMMARY.median_fwhm_milli_pixels @
+            ia.milli$ map =>" FWHM"
+        ia.summary IA_FRAME_SUMMARY.mad_fwhm_milli_pixels @
+            ia.milli$ map =>" FWHMMAD"
+        ia.summary IA_FRAME_SUMMARY.median_ellipticity_milli @
+            ia.milli$ map =>" ELLIP"
+        ia.summary IA_FRAME_SUMMARY.median_snr_milli @
+            ia.milli$ map =>" STARSNR"
+    then
+    ia.summary IA_FRAME_SUMMARY.background_milli_adu @
+        ia.milli$ map =>" BKG"
+    ia.summary IA_FRAME_SUMMARY.noise_milli_adu @
+        ia.milli$ map =>" BKGNOIS"
+;
+
+: compute-starStats { img | status -- status }
+\ Analyze the current in-memory 16-bit frame; Forth owns rejection policy.
+    <IA_FRAME_SUMMARY> ia.summary IA_FRAME_SUMMARY.struct_size !
+    img FRAME_BITMAP
+    img FRAME_WIDTH @
+    img FRAME_HEIGHT @
+    img FRAME_WIDTH @
+    ia.config
+    ia.workspace
+    ia.workspace.bytes
+    ia.stars
+    IA.MAX_STARS
+    ia.summary
+    IA_AnalyzeFrame -> status
+    status IA.OK = if
+        ia.reject-flags ia.summarize drop
+    then
+    img ia.add-FITS
+    status
+;
+
 BEGIN-STRUCTURE <FRAME_STATISTICS>
     0x40000 +FIELD HISTOGRAM                        \ one 32 bit cell for each 16 bit brightness value
     0x40000 +FIELD HISTOGRAM_ABSOLUTE_DEVIATION     \ histogram of the absolute deviations of the pixels from the median
@@ -177,6 +457,7 @@ END-CODE
     image compute-ASBDhistogram              \ must compute the median first
     imagestats compute-median_absolute_deviation
     image add-ImageAnalysisFITS
+    image compute-starStats drop
 ;
 
 : combine-images { n x y addr0 | half-n size dest -- }	\ VFX locals

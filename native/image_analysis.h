@@ -56,6 +56,7 @@ typedef struct IAConfig {
     uint32_t annulus_inner_radius_pixels;
     uint32_t annulus_outer_radius_pixels;
     uint32_t minimum_snr_milli;
+    uint32_t blend_minimum_contrast_milli;
 } IAConfig;
 
 typedef struct IAStar {

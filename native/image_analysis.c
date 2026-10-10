@@ -647,7 +647,13 @@ static void ia_measure_candidate(
         dx = (int64_t)all_candidates[i].x - candidate->x;
         dy = (int64_t)all_candidates[i].y - candidate->y;
         distance_squared = (uint64_t)(dx * dx + dy * dy);
-        if (distance_squared <= (uint64_t)radius * radius) {
+        if (distance_squared <= (uint64_t)radius * radius &&
+            distance_squared >=
+                (uint64_t)config->minimum_separation_pixels *
+                    config->minimum_separation_pixels &&
+            (uint64_t)all_candidates[i].peak * IA_MILLI >=
+                (uint64_t)candidate->peak *
+                    config->blend_minimum_contrast_milli) {
             star->flags |= IA_STAR_BLENDED;
             break;
         }
@@ -707,6 +713,7 @@ void IA_CALL IA_DefaultConfig(IAConfig *config)
     config->annulus_inner_radius_pixels = 18u;
     config->annulus_outer_radius_pixels = 24u;
     config->minimum_snr_milli = 5000u;
+    config->blend_minimum_contrast_milli = 500u;
 }
 
 uint32_t IA_CALL IA_WorkspaceBytes(uint32_t maximum_stars)

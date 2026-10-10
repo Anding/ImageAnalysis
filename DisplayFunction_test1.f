@@ -17,4 +17,3 @@ T{ imageStats df.h @ }T 65536 ==
 Tend
 
 imageStats free drop
-bye

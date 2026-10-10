@@ -28,6 +28,11 @@ FILEPATH_SIZE allocate-buffer constant display.test.path
 
 display.make-frame -> img1
 img1 FRAME_WIDTH @ img1 FRAME_HEIGHT @ img1 FRAME_DEPTH @ allocate-frame -> img2
+s" UInt16" img2 FRAME_METADATA @ =>" SMPLFRMT"
+s" Gray" img2 FRAME_METADATA @ =>" COLORSPC"
+s" Light" img2 FRAME_METADATA @ =>" IMAGETYP"
+s" 0" img2 FRAME_METADATA @ =>" OFFSET"
+s" display-test-stretched" img2 FRAME_METADATA @ =>" UUID"
 
 img1 compute-imageStats
 img1 img2 apply-displayFunction
@@ -44,4 +49,3 @@ Tend
 
 img1 free-frame
 img2 free-frame
-bye
