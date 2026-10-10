@@ -30,6 +30,8 @@ mono_crash.*
 [Ww][Ii][Nn]32/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
+ImageAnalysis_project/Release/
+ImageAnalysis_project/ImageAna.*/
 bld/
 [Bb]in/
 [Oo]bj/
