@@ -18,6 +18,74 @@ typedef struct XISFImage {
     uint32_t height;
 } XISFImage;
 
+static void calibrate_models(const IAFocusSample *samples, uint32_t count)
+{
+    IAFocusModel model;
+    IAFocusModel best_piecewise;
+    IAFocusModel best_hyperbola;
+    IAFocusFit fit;
+    IAFocusFit best_piecewise_fit;
+    IAFocusFit best_hyperbola_fit;
+    int32_t left_slope;
+    int32_t right_slope;
+    int32_t radius;
+    int32_t slope;
+
+    memset(&best_piecewise, 0, sizeof(best_piecewise));
+    memset(&best_hyperbola, 0, sizeof(best_hyperbola));
+    memset(&best_piecewise_fit, 0, sizeof(best_piecewise_fit));
+    memset(&best_hyperbola_fit, 0, sizeof(best_hyperbola_fit));
+    best_piecewise_fit.rms_residual_milli = INT32_MAX;
+    best_hyperbola_fit.rms_residual_milli = INT32_MAX;
+
+    memset(&model, 0, sizeof(model));
+    model.struct_size = sizeof(model);
+    model.kind = IA_FOCUS_PIECEWISE_V;
+    for (left_slope = 40000; left_slope <= 130000; left_slope += 2000) {
+        for (right_slope = 40000; right_slope <= 130000; right_slope += 2000) {
+            model.left_slope_micro_per_step = left_slope;
+            model.right_slope_micro_per_step = right_slope;
+            fit.struct_size = sizeof(fit);
+            if (IA_FitFocusModel(
+                    &model, samples, count, UINT32_MAX, 250u, &fit) == IA_OK &&
+                fit.rms_residual_milli < best_piecewise_fit.rms_residual_milli) {
+                best_piecewise = model;
+                best_piecewise_fit = fit;
+            }
+        }
+    }
+
+    memset(&model, 0, sizeof(model));
+    model.struct_size = sizeof(model);
+    model.kind = IA_FOCUS_HYPERBOLA;
+    for (radius = 1000; radius <= 6000; radius += 100) {
+        for (slope = 40000; slope <= 130000; slope += 2000) {
+            model.hyperbola_radius_milli = radius;
+            model.hyperbola_slope_micro_per_step = slope;
+            fit.struct_size = sizeof(fit);
+            if (IA_FitFocusModel(
+                    &model, samples, count, UINT32_MAX, 250u, &fit) == IA_OK &&
+                fit.rms_residual_milli < best_hyperbola_fit.rms_residual_milli) {
+                best_hyperbola = model;
+                best_hyperbola_fit = fit;
+            }
+        }
+    }
+
+    fprintf(stderr,
+        "calibrated piecewise-V slopes %d/%d, focus %.3f, residual %.3f\n",
+        best_piecewise.left_slope_micro_per_step,
+        best_piecewise.right_slope_micro_per_step,
+        best_piecewise_fit.focus_milli_steps / 1000.0,
+        best_piecewise_fit.rms_residual_milli / 1000.0);
+    fprintf(stderr,
+        "calibrated hyperbola radius %d, slope %d, focus %.3f, residual %.3f\n",
+        best_hyperbola.hyperbola_radius_milli,
+        best_hyperbola.hyperbola_slope_micro_per_step,
+        best_hyperbola_fit.focus_milli_steps / 1000.0,
+        best_hyperbola_fit.rms_residual_milli / 1000.0);
+}
+
 static int load_xisf(const char *path, XISFImage *image)
 {
     FILE *file;
@@ -84,6 +152,7 @@ int main(int argc, char **argv)
     uint32_t workspace_bytes;
     uint32_t locked_count = 0u;
     IAFocusSample samples[MAX_LOCKED_STARS][MAX_FOCUS_FRAMES];
+    IAFocusSample frame_samples[MAX_FOCUS_FRAMES];
     uint32_t sample_count = 0u;
     XISFImage discovery;
     int status;
@@ -107,6 +176,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    memset(&summary, 0, sizeof(summary));
     summary.struct_size = sizeof(summary);
     status = IA_AnalyzeFrame(
         discovery.pixels, discovery.width, discovery.height, discovery.width,
@@ -168,6 +238,12 @@ int main(int argc, char **argv)
             measurements, locked_count,
             IA_STAR_SATURATED | IA_STAR_EDGE | IA_STAR_TOO_SMALL | IA_STAR_LOW_SNR,
             workspace, workspace_bytes, &summary);
+        frame_samples[sample_count].focus_position = focus_position(argv[argument]);
+        frame_samples[sample_count].metric_milli =
+            summary.median_hfd_milli_pixels;
+        frame_samples[sample_count].weight_milli =
+            summary.included_stars * IA_MILLI;
+        frame_samples[sample_count].flags = status == IA_OK ? 0u : 1u;
         milliseconds = 1000.0 * (finish - start) / CLOCKS_PER_SEC;
         printf("%d,%.3f,%u,%.3f,%.3f,%.3f,%.3f,%.3f",
             focus_position(argv[argument]), milliseconds, summary.included_stars,
@@ -196,12 +272,12 @@ int main(int argc, char **argv)
         memset(models, 0, sizeof(models));
         models[0].struct_size = sizeof(models[0]);
         models[0].kind = IA_FOCUS_PIECEWISE_V;
-        models[0].left_slope_micro_per_step = 80000;
+        models[0].left_slope_micro_per_step = 85000;
         models[0].right_slope_micro_per_step = 85000;
         models[1].struct_size = sizeof(models[1]);
         models[1].kind = IA_FOCUS_HYPERBOLA;
-        models[1].hyperbola_radius_milli = 2700;
-        models[1].hyperbola_slope_micro_per_step = 90000;
+        models[1].hyperbola_radius_milli = 3850;
+        models[1].hyperbola_slope_micro_per_step = 108000;
 
         for (model_index = 0u; model_index < 2u; ++model_index) {
             IAFocusFit fits[MAX_LOCKED_STARS];
@@ -210,13 +286,14 @@ int main(int argc, char **argv)
             uint32_t fitted = 0u;
 
             for (i = 0u; i < locked_count; ++i) {
-                fits[i].struct_size = sizeof(fits[i]);
+                IAFocusFit star_fit;
+                star_fit.struct_size = sizeof(star_fit);
                 if (IA_FitFocusModel(
                     &models[model_index], samples[i], sample_count,
                     IA_STAR_SATURATED | IA_STAR_EDGE | IA_STAR_TOO_SMALL |
                         IA_STAR_LOW_SNR,
-                    250u, &fits[i]) == IA_OK) {
-                    ++fitted;
+                    250u, &star_fit) == IA_OK) {
+                    fits[fitted++] = star_fit;
                 }
             }
             focus_summary.struct_size = sizeof(focus_summary);
@@ -238,6 +315,7 @@ int main(int argc, char **argv)
             }
         }
     }
+    calibrate_models(frame_samples, sample_count);
 
     free(workspace);
     return 0;
