@@ -183,6 +183,11 @@ static void test_calculations(void)
         "ensemble recommends shorter exposure for better focus");
     CHECK(status == IA_OK && worse_exposure > 4000u,
         "ensemble recommends longer exposure for worse focus");
+    status = IA_RecommendFocusExposure(
+        4000u, stars, NULL, 2u, 20000u, 50000u,
+        100u, 10000u, 2000u, &exposure, &worse_exposure);
+    CHECK(status == IA_OK && exposure == worse_exposure,
+        "ensemble initial recommendation has no focus direction");
 
     memset(stars, 0, sizeof(stars));
     stars[0].x_milli = 20000;

@@ -1055,84 +1055,15 @@ int IA_CALL IA_RecommendExposure(
     return IA_OK;
 }
 
-static int ia_recommend_focus_exposure(
+static uint32_t ia_exposure_from_range(
     uint32_t current_milliseconds,
-    const IAStar *measurements,
-    const IAStar *previous_measurements,
-    uint32_t star_count,
-    uint32_t target_minimum_peak_adu,
-    uint32_t target_maximum_peak_adu,
+    double required_minimum,
+    double allowed_maximum,
     uint32_t minimum_milliseconds,
     uint32_t maximum_milliseconds,
-    uint32_t maximum_change_milli,
-    int focus_direction,
-    uint32_t *recommended_milliseconds)
+    double maximum_ratio)
 {
-    double required_minimum = 0.0;
-    double allowed_maximum = HUGE_VAL;
-    double maximum_ratio;
     double recommended;
-    uint32_t usable = 0u;
-    uint32_t i;
-
-    for (i = 0u; i < star_count; ++i) {
-        double background =
-            measurements[i].background_milli_adu / (double)IA_MILLI;
-        double current_hfd = measurements[i].hfd_milli_pixels;
-        double predicted_hfd = current_hfd;
-        double hfd_change;
-        double measured_signal;
-        double predicted_signal;
-        double target_minimum_signal;
-        double target_maximum_signal;
-        double star_minimum;
-        double star_maximum;
-
-        if (background < 0.0) background = 0.0;
-        if (current_hfd <= 0.0 || measurements[i].peak_adu <= background) {
-            continue;
-        }
-        if (previous_measurements != NULL &&
-            previous_measurements[i].hfd_milli_pixels > 0) {
-            hfd_change = fabs(
-                current_hfd -
-                previous_measurements[i].hfd_milli_pixels);
-            predicted_hfd =
-                current_hfd + focus_direction * hfd_change;
-            if (predicted_hfd < current_hfd * 0.5) {
-                predicted_hfd = current_hfd * 0.5;
-            }
-            if (predicted_hfd > current_hfd * 2.0) {
-                predicted_hfd = current_hfd * 2.0;
-            }
-        }
-        measured_signal = measurements[i].peak_adu - background;
-        predicted_signal = measured_signal *
-            (current_hfd * current_hfd) /
-            (predicted_hfd * predicted_hfd);
-        target_minimum_signal = target_minimum_peak_adu - background;
-        target_maximum_signal = target_maximum_peak_adu - background;
-        if (predicted_signal <= 0.0 || target_minimum_signal <= 0.0 ||
-            target_maximum_signal <= target_minimum_signal) {
-            continue;
-        }
-        star_minimum =
-            current_milliseconds * target_minimum_signal / predicted_signal;
-        star_maximum =
-            current_milliseconds * target_maximum_signal / predicted_signal;
-        if (star_minimum > required_minimum) required_minimum = star_minimum;
-        if (star_maximum < allowed_maximum) allowed_maximum = star_maximum;
-        ++usable;
-        ia_debug_log(
-            "IA_RecommendFocusExposure direction=%d star=%u peak=%u hfd=%d predicted_hfd=%.0f range=%.0f-%.0f",
-            focus_direction, i, measurements[i].peak_adu,
-            measurements[i].hfd_milli_pixels, predicted_hfd,
-            star_minimum, star_maximum);
-    }
-    if (usable == 0u) {
-        ia_debug_log("IA_RecommendFocusExposure no usable stars");
-        return IA_NO_STARS;
-    }
 
     if (required_minimum <= allowed_maximum) {
         recommended = current_milliseconds;
@@ -1141,7 +1072,6 @@ static int ia_recommend_focus_exposure(
     } else {
         recommended = allowed_maximum;
     }
-    maximum_ratio = (double)maximum_change_milli / IA_MILLI;
     if (recommended > current_milliseconds * maximum_ratio) {
         recommended = current_milliseconds * maximum_ratio;
     }
@@ -1150,12 +1080,7 @@ static int ia_recommend_focus_exposure(
     }
     if (recommended < minimum_milliseconds) recommended = minimum_milliseconds;
     if (recommended > maximum_milliseconds) recommended = maximum_milliseconds;
-    *recommended_milliseconds = ia_clamp_u32(recommended);
-    ia_debug_log(
-        "IA_RecommendFocusExposure direction=%d exit usable=%u common=%d range=%.0f-%.0f recommended=%u",
-        focus_direction, usable, required_minimum <= allowed_maximum,
-        required_minimum, allowed_maximum, *recommended_milliseconds);
-    return IA_OK;
+    return ia_clamp_u32(recommended);
 }
 
 int IA_CALL IA_RecommendFocusExposure(
@@ -1171,7 +1096,13 @@ int IA_CALL IA_RecommendFocusExposure(
     uint32_t *better_focus_milliseconds,
     uint32_t *worse_focus_milliseconds)
 {
-    int status;
+    double better_minimum = 0.0;
+    double better_maximum = HUGE_VAL;
+    double worse_minimum = 0.0;
+    double worse_maximum = HUGE_VAL;
+    double maximum_ratio;
+    uint32_t usable = 0u;
+    uint32_t i;
 
     ia_debug_log(
         "IA_RecommendFocusExposure enter current=%u stars=%u target=%u-%u",
@@ -1186,19 +1117,96 @@ int IA_CALL IA_RecommendFocusExposure(
         ia_debug_log("IA_RecommendFocusExposure invalid argument");
         return IA_INVALID_ARGUMENT;
     }
-    status = ia_recommend_focus_exposure(
-        current_milliseconds, measurements, previous_measurements, star_count,
-        target_minimum_peak_adu, target_maximum_peak_adu,
-        minimum_milliseconds, maximum_milliseconds, maximum_change_milli,
-        -1, better_focus_milliseconds);
-    if (status != IA_OK) {
-        return status;
+
+    for (i = 0u; i < star_count; ++i) {
+        double background =
+            measurements[i].background_milli_adu / (double)IA_MILLI;
+        double current_hfd = measurements[i].hfd_milli_pixels;
+        double hfd_change = 0.0;
+        double better_hfd;
+        double worse_hfd;
+        double measured_signal;
+        double target_minimum_signal;
+        double target_maximum_signal;
+        double exposure_scale;
+        double better_star_minimum;
+        double better_star_maximum;
+        double worse_star_minimum;
+        double worse_star_maximum;
+
+        if (background < 0.0) background = 0.0;
+        if (current_hfd <= 0.0 || measurements[i].peak_adu <= background) {
+            continue;
+        }
+        if (previous_measurements != NULL &&
+            previous_measurements[i].hfd_milli_pixels > 0) {
+            hfd_change = fabs(
+                current_hfd -
+                previous_measurements[i].hfd_milli_pixels);
+        }
+        better_hfd = fmax(current_hfd * 0.5, current_hfd - hfd_change);
+        worse_hfd = fmin(current_hfd * 2.0, current_hfd + hfd_change);
+        measured_signal = measurements[i].peak_adu - background;
+        target_minimum_signal = target_minimum_peak_adu - background;
+        target_maximum_signal = target_maximum_peak_adu - background;
+        if (target_minimum_signal <= 0.0 ||
+            target_maximum_signal <= target_minimum_signal) {
+            continue;
+        }
+
+        exposure_scale =
+            current_milliseconds /
+            (measured_signal * current_hfd * current_hfd);
+        better_star_minimum =
+            exposure_scale * target_minimum_signal *
+            better_hfd * better_hfd;
+        better_star_maximum =
+            exposure_scale * target_maximum_signal *
+            better_hfd * better_hfd;
+        worse_star_minimum =
+            exposure_scale * target_minimum_signal *
+            worse_hfd * worse_hfd;
+        worse_star_maximum =
+            exposure_scale * target_maximum_signal *
+            worse_hfd * worse_hfd;
+        if (better_star_minimum > better_minimum) {
+            better_minimum = better_star_minimum;
+        }
+        if (better_star_maximum < better_maximum) {
+            better_maximum = better_star_maximum;
+        }
+        if (worse_star_minimum > worse_minimum) {
+            worse_minimum = worse_star_minimum;
+        }
+        if (worse_star_maximum < worse_maximum) {
+            worse_maximum = worse_star_maximum;
+        }
+        ++usable;
+        ia_debug_log(
+            "IA_RecommendFocusExposure star=%u peak=%u hfd=%d better_hfd=%.0f better_range=%.0f-%.0f worse_hfd=%.0f worse_range=%.0f-%.0f",
+            i, measurements[i].peak_adu,
+            measurements[i].hfd_milli_pixels,
+            better_hfd, better_star_minimum, better_star_maximum,
+            worse_hfd, worse_star_minimum, worse_star_maximum);
     }
-    return ia_recommend_focus_exposure(
-        current_milliseconds, measurements, previous_measurements, star_count,
-        target_minimum_peak_adu, target_maximum_peak_adu,
-        minimum_milliseconds, maximum_milliseconds, maximum_change_milli,
-        1, worse_focus_milliseconds);
+    if (usable == 0u) {
+        ia_debug_log("IA_RecommendFocusExposure no usable stars");
+        return IA_NO_STARS;
+    }
+
+    maximum_ratio = (double)maximum_change_milli / IA_MILLI;
+    *better_focus_milliseconds = ia_exposure_from_range(
+        current_milliseconds, better_minimum, better_maximum,
+        minimum_milliseconds, maximum_milliseconds, maximum_ratio);
+    *worse_focus_milliseconds = ia_exposure_from_range(
+        current_milliseconds, worse_minimum, worse_maximum,
+        minimum_milliseconds, maximum_milliseconds, maximum_ratio);
+    ia_debug_log(
+        "IA_RecommendFocusExposure exit usable=%u better=%.0f-%.0f/%u worse=%.0f-%.0f/%u",
+        usable,
+        better_minimum, better_maximum, *better_focus_milliseconds,
+        worse_minimum, worse_maximum, *worse_focus_milliseconds);
+    return IA_OK;
 }
 
 int IA_CALL IA_ComputeStarROI(
@@ -1352,7 +1360,8 @@ int IA_CALL IA_FitFocusModel(
     first_center = (int64_t)minimum_position * IA_MILLI;
     last_center = (int64_t)maximum_position * IA_MILLI;
     for (center = first_center; center <= last_center; center += resolution_milli_steps) {
-        double weighted_offset_sum = 0.0;
+        double weighted_residual_sum = 0.0;
+        double weighted_squared_residual_sum = 0.0;
         double weight_sum = 0.0;
         double squared_error = 0.0;
         double offset;
@@ -1363,22 +1372,16 @@ int IA_CALL IA_FitFocusModel(
                 double weight = (double)samples[i].weight_milli / IA_MILLI;
                 double delta = samples[i].focus_position - (double)center / IA_MILLI;
                 double shape = ia_focus_shape(model, delta);
-                weighted_offset_sum += weight * (samples[i].metric_milli - shape);
+                double residual = samples[i].metric_milli - shape;
+                weighted_residual_sum += weight * residual;
+                weighted_squared_residual_sum += weight * residual * residual;
                 weight_sum += weight;
             }
         }
-        offset = weighted_offset_sum / weight_sum;
-        for (i = 0u; i < sample_count; ++i) {
-            if ((samples[i].flags & reject_sample_flags) == 0u &&
-                samples[i].weight_milli > 0u) {
-                double weight = (double)samples[i].weight_milli / IA_MILLI;
-                double delta = samples[i].focus_position - (double)center / IA_MILLI;
-                double residual = samples[i].metric_milli -
-                    (ia_focus_shape(model, delta) + offset);
-                squared_error += weight * residual * residual;
-            }
-        }
-        squared_error /= weight_sum;
+        offset = weighted_residual_sum / weight_sum;
+        squared_error =
+            weighted_squared_residual_sum / weight_sum - offset * offset;
+        if (squared_error < 0.0) squared_error = 0.0;
         if (squared_error < best_error) {
             best_error = squared_error;
             best_center = center;
