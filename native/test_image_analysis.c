@@ -154,7 +154,6 @@ static void test_detection_and_measurement(void)
 static void test_calculations(void)
 {
     uint32_t exposure = 0u;
-    uint32_t worse_exposure = 0u;
     IAStar stars[2];
     IARect roi;
     int status;
@@ -163,31 +162,6 @@ static void test_calculations(void)
         100u, 10000u, 4000u, &exposure);
     CHECK(status == IA_OK, "recommend exposure");
     CHECK(exposure == 2000u, "linear exposure recommendation");
-
-    memset(stars, 0, sizeof(stars));
-    stars[0].peak_adu = 31000u;
-    stars[0].background_milli_adu = 1000000;
-    stars[0].hfd_milli_pixels = 6000;
-    stars[1].peak_adu = 26000u;
-    stars[1].background_milli_adu = 1000000;
-    stars[1].hfd_milli_pixels = 7000;
-    {
-        IAStar previous[2] = { stars[0], stars[1] };
-        previous[0].hfd_milli_pixels = 8000;
-        previous[1].hfd_milli_pixels = 9000;
-        status = IA_RecommendFocusExposure(
-            4000u, stars, previous, 2u, 20000u, 50000u,
-            100u, 10000u, 2000u, &exposure, &worse_exposure);
-    }
-    CHECK(status == IA_OK && exposure < 4000u,
-        "ensemble recommends shorter exposure for better focus");
-    CHECK(status == IA_OK && worse_exposure > 4000u,
-        "ensemble recommends longer exposure for worse focus");
-    status = IA_RecommendFocusExposure(
-        4000u, stars, NULL, 2u, 20000u, 50000u,
-        100u, 10000u, 2000u, &exposure, &worse_exposure);
-    CHECK(status == IA_OK && exposure == worse_exposure,
-        "ensemble initial recommendation has no focus direction");
 
     memset(stars, 0, sizeof(stars));
     stars[0].x_milli = 20000;
@@ -200,92 +174,185 @@ static void test_calculations(void)
         "ideal ROI bounds");
 }
 
-static int32_t piecewise_metric(
+static void make_focus_frame(
+    uint16_t *image,
     int32_t focus,
-    int32_t center,
-    int32_t baseline,
-    int32_t left_slope,
-    int32_t right_slope)
+    uint32_t exposure_milliseconds)
 {
-    int32_t distance = focus - center;
-    int32_t slope = distance < 0 ? left_slope : right_slope;
-    if (distance < 0) distance = -distance;
-    return baseline + (int32_t)((int64_t)distance * slope / IA_MILLI);
-}
-
-static int32_t hyperbola_metric(
-    int32_t focus,
-    int32_t center,
-    int32_t baseline,
-    int32_t radius,
-    int32_t slope)
-{
-    double distance = focus - center;
-    double scaled = distance * slope / IA_MILLI;
-    return baseline + (int32_t)(sqrt((double)radius * radius + scaled * scaled) + 0.5);
-}
-
-static void test_focus_fitting(void)
-{
-    IAFocusSample samples[11];
-    IAFocusModel model;
-    IAFocusFit fits[3];
-    IAFocusSummary summary;
-    int32_t workspace[3];
+    double sigma = 1.5 + fabs(focus - 5030) * 0.02;
+    double exposure_scale = exposure_milliseconds / 1000.0;
+    double focus_scale = 2.25 / (sigma * sigma);
     uint32_t i;
+
+    for (i = 0u; i < WIDTH * HEIGHT; ++i) {
+        image[i] = (uint16_t)(1000u + (i * 17u) % 5u);
+    }
+    add_gaussian(
+        image, 50.0, 40.0, sigma, sigma,
+        30000.0 * exposure_scale * focus_scale);
+    add_gaussian(
+        image, 75.0, 55.0, sigma * 1.05, sigma * 1.05,
+        26000.0 * exposure_scale * focus_scale);
+    add_gaussian(
+        image, 100.0, 70.0, sigma * 0.95, sigma * 0.95,
+        22000.0 * exposure_scale * focus_scale);
+}
+
+static void test_focus_run(void)
+{
+    uint16_t *image =
+        (uint16_t *)malloc(WIDTH * HEIGHT * sizeof(uint16_t));
+    uint32_t run_bytes = IA_FocusRunBytes();
+    void *run = malloc(run_bytes);
+    IAConfig analysis_config;
+    IAFocusConfig focus_config;
+    IAFocusRequest request;
+    IAFocusResult result;
+    IAFocusDiagnostic diagnostic;
+    uint32_t observations = 0u;
     int status;
 
-    memset(&model, 0, sizeof(model));
-    model.struct_size = sizeof(model);
-    model.kind = IA_FOCUS_PIECEWISE_V;
-    model.baseline_milli = 3000;
-    model.left_slope_micro_per_step = 38000;
-    model.right_slope_micro_per_step = 42000;
-    for (i = 0u; i < 11u; ++i) {
-        samples[i].focus_position = 4900 + (int32_t)i * 20;
-        samples[i].metric_milli = piecewise_metric(
-            samples[i].focus_position, 5037, 3250, 38000, 42000);
-        samples[i].weight_milli = IA_MILLI;
-        samples[i].flags = 0u;
+    CHECK(image != NULL && run != NULL, "allocate focus-run buffers");
+    if (image == NULL || run == NULL) {
+        free(image);
+        free(run);
+        return;
     }
-    fits[0].struct_size = sizeof(fits[0]);
-    status = IA_FitFocusModel(&model, samples, 11u, 0u, 250u, &fits[0]);
-    CHECK(status == IA_OK, "fit piecewise focus model");
-    CHECK(abs(fits[0].focus_milli_steps - 5037000) <= 250,
-        "piecewise focus position");
-    CHECK(fits[0].rms_residual_milli <= 10, "piecewise residual");
-    CHECK(fits[0].points_left > 0u && fits[0].points_right > 0u,
-        "piecewise bracket geometry");
+    IA_DefaultConfig(&analysis_config);
+    IA_DefaultFocusConfig(&focus_config);
+    focus_config.star_limit = 3u;
+    focus_config.target_minimum_peak_adu = 5000u;
+    focus_config.target_maximum_peak_adu = 60000u;
+    focus_config.maximum_residual_milli = 1500u;
+    make_focus_frame(image, 5030, 1000u);
+    request.struct_size = sizeof(request);
+    status = IA_BeginFocusRun(
+        run, run_bytes, &focus_config, &analysis_config,
+        image, WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
+    CHECK(status == IA_OK, "begin bitmap-driven focus run");
+    CHECK(request.action == IA_FOCUS_CAPTURE, "request first focus frame");
+    CHECK(request.roi.width > 0 && request.roi.height > 0,
+        "recommend compact focus ROI");
 
-    model.kind = IA_FOCUS_HYPERBOLA;
-    model.baseline_milli = 500;
-    model.hyperbola_radius_milli = 2200;
-    model.hyperbola_slope_micro_per_step = 45000;
-    for (i = 0u; i < 11u; ++i) {
-        samples[i].metric_milli = hyperbola_metric(
-            samples[i].focus_position, 5026, 700,
-            model.hyperbola_radius_milli,
-            model.hyperbola_slope_micro_per_step);
+    while (status == IA_OK &&
+           (request.action == IA_FOCUS_CAPTURE ||
+            request.action == IA_FOCUS_RETAKE) &&
+           observations < 30u) {
+        make_focus_frame(
+            image, request.focus_position,
+            request.exposure_milliseconds);
+        status = IA_SubmitFocusFrame(
+            run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+            request.focus_position, request.exposure_milliseconds,
+            &request);
+        ++observations;
     }
-    fits[1].struct_size = sizeof(fits[1]);
-    status = IA_FitFocusModel(&model, samples, 11u, 0u, 250u, &fits[1]);
-    CHECK(status == IA_OK, "fit hyperbolic focus model");
-    CHECK(abs(fits[1].focus_milli_steps - 5026000) <= 250,
-        "hyperbolic focus position");
-    CHECK(fits[1].rms_residual_milli <= 10, "hyperbolic residual");
+    CHECK(status == IA_OK, "submit focus frames");
+    CHECK(request.action == IA_FOCUS_COMPLETE, "complete focus run");
+    result.struct_size = sizeof(result);
+    status = IA_EndFocusRun(run, &result);
+    CHECK(status == IA_OK, "return focus result");
+    CHECK(result.stars_locked == 3u && result.stars_fitted >= 1u,
+        "fit independently locked stars");
+    CHECK(abs(result.focus_milli_steps - 5030000) < 5000,
+        "intersecting lines recover focus");
+    CHECK(result.recommended_exposure_milliseconds > 0u,
+        "recommend verification exposure");
 
-    fits[2] = fits[1];
-    fits[0].focus_milli_steps = 5025000;
-    fits[1].focus_milli_steps = 5026000;
-    fits[2].focus_milli_steps = 5099000;
-    fits[2].flags = IA_FOCUS_AT_BOUNDARY;
-    summary.struct_size = sizeof(summary);
-    status = IA_CombineFocusFits(
-        fits, 3u, IA_FOCUS_AT_BOUNDARY, workspace, sizeof(workspace), &summary);
-    CHECK(status == IA_OK, "combine focus fits");
-    CHECK(summary.fits_included == 2u, "exclude flagged focus fit");
-    CHECK(summary.median_focus_milli_steps == 5025500, "combined focus median");
-    CHECK(summary.mad_focus_milli_steps == 500, "combined focus MAD");
+    make_focus_frame(
+        image, (result.focus_milli_steps + 500) / IA_MILLI,
+        result.recommended_exposure_milliseconds);
+    diagnostic.struct_size = sizeof(diagnostic);
+    status = IA_DiagnoseFocusFrame(
+        run, image, WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
+    CHECK(status == IA_OK, "diagnose verification frame");
+    CHECK(diagnostic.stars_measured >= 1u &&
+          diagnostic.median_hfd_milli_pixels > 0,
+        "return HFD observing diagnostic");
+
+    image[40u * WIDTH + 50u] = UINT16_MAX;
+    diagnostic.struct_size = sizeof(diagnostic);
+    status = IA_DiagnoseFocusFrame(
+        run, image, WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
+    CHECK(status == IA_OK, "diagnose partially saturated frame");
+    CHECK(diagnostic.saturated_stars == 1u &&
+          diagnostic.stars_measured >= 1u,
+        "retain unsaturated diagnostic stars");
+    free(run);
+    free(image);
+}
+
+static void test_focus_failures(void)
+{
+    uint16_t *image =
+        (uint16_t *)malloc(WIDTH * HEIGHT * sizeof(uint16_t));
+    uint32_t run_bytes = IA_FocusRunBytes();
+    void *run = malloc(run_bytes);
+    IAConfig analysis_config;
+    IAFocusConfig focus_config;
+    IAFocusRequest request;
+    uint32_t submissions;
+    int saw_retake;
+    int status;
+
+    CHECK(image != NULL && run != NULL, "allocate focus failure buffers");
+    if (image == NULL || run == NULL) {
+        free(image);
+        free(run);
+        return;
+    }
+    IA_DefaultConfig(&analysis_config);
+    IA_DefaultFocusConfig(&focus_config);
+    focus_config.star_limit = 3u;
+    focus_config.target_minimum_peak_adu = 5000u;
+    focus_config.target_maximum_peak_adu = 60000u;
+
+    make_focus_frame(image, 5030, 1000u);
+    request.struct_size = sizeof(request);
+    status = IA_BeginFocusRun(
+        run, run_bytes, &focus_config, &analysis_config,
+        image, WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
+    saw_retake = 0;
+    for (submissions = 0u;
+         status == IA_OK && request.action != IA_FOCUS_FAILED &&
+         submissions < 30u;
+         ++submissions) {
+        make_focus_frame(image, request.focus_position, 10000u);
+        status = IA_SubmitFocusFrame(
+            run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+            request.focus_position, 10000u,
+            &request);
+        if (request.action == IA_FOCUS_RETAKE) saw_retake = 1;
+    }
+    CHECK(status == IA_OK && saw_retake, "retake saturated focus frame");
+    CHECK(request.action == IA_FOCUS_FAILED &&
+          (request.reason_flags &
+           (IA_FOCUS_REASON_SATURATED | IA_FOCUS_REASON_NO_STARS)) ==
+          (IA_FOCUS_REASON_SATURATED | IA_FOCUS_REASON_NO_STARS),
+        "fail after saturated-frame retries");
+
+    make_focus_frame(image, 5030, 1000u);
+    request.struct_size = sizeof(request);
+    status = IA_BeginFocusRun(
+        run, run_bytes, &focus_config, &analysis_config,
+        image, WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
+    for (submissions = 0u;
+         status == IA_OK &&
+         (request.action == IA_FOCUS_CAPTURE ||
+          request.action == IA_FOCUS_RETAKE) &&
+         submissions < 30u;
+         ++submissions) {
+        make_focus_frame(image, 4900, request.exposure_milliseconds);
+        status = IA_SubmitFocusFrame(
+            run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+            request.focus_position, request.exposure_milliseconds,
+            &request);
+    }
+    CHECK(status == IA_OK && request.action == IA_FOCUS_FAILED &&
+          (request.reason_flags & IA_FOCUS_REASON_NO_CURVE) != 0u,
+        "reject focus series without opposing branches");
+    free(run);
+    free(image);
 }
 
 int main(void)
@@ -294,7 +361,8 @@ int main(void)
     test_debug_logging();
     test_detection_and_measurement();
     test_calculations();
-    test_focus_fitting();
+    test_focus_run();
+    test_focus_failures();
     if (failures != 0) {
         fprintf(stderr, "%d native image-analysis test(s) failed\n", failures);
         return 1;

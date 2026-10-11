@@ -30,8 +30,10 @@
 extern "C" {
 #endif
 
-#define IA_API_VERSION 1u
+#define IA_API_VERSION 2u
 #define IA_MILLI 1000
+#define IA_FOCUS_MAX_STARS 7u
+#define IA_FOCUS_MAX_POINTS 15u
 #ifndef IA_DEBUG_LOG_PATH
 #define IA_DEBUG_LOG_PATH "E:\\images\\logs\\image-analysis-native.log"
 #endif
@@ -51,16 +53,19 @@ enum IAStarFlags {
     IA_STAR_LOW_SNR = 1u << 4
 };
 
-enum IAFocusModelKind {
-    IA_FOCUS_PIECEWISE_V = 1,
-    IA_FOCUS_HYPERBOLA = 2
+enum IAFocusAction {
+    IA_FOCUS_CAPTURE = 1,
+    IA_FOCUS_RETAKE = 2,
+    IA_FOCUS_COMPLETE = 3,
+    IA_FOCUS_FAILED = 4
 };
 
-enum IAFocusFitFlags {
-    IA_FOCUS_INSUFFICIENT_POINTS = 1u << 0,
-    IA_FOCUS_ONE_SIDED = 1u << 1,
-    IA_FOCUS_AT_BOUNDARY = 1u << 2,
-    IA_FOCUS_INVALID_MODEL = 1u << 3
+enum IAFocusReason {
+    IA_FOCUS_REASON_NONE = 0,
+    IA_FOCUS_REASON_SATURATED = 1u << 0,
+    IA_FOCUS_REASON_TOO_FAINT = 1u << 1,
+    IA_FOCUS_REASON_NO_STARS = 1u << 2,
+    IA_FOCUS_REASON_NO_CURVE = 1u << 3
 };
 
 typedef struct IAConfig {
@@ -129,41 +134,51 @@ typedef struct IARect {
     int32_t height;
 } IARect;
 
-typedef struct IAFocusModel {
+typedef struct IAFocusConfig {
     uint32_t struct_size;
-    uint32_t kind;
-    int32_t baseline_milli;
-    int32_t left_slope_micro_per_step;
-    int32_t right_slope_micro_per_step;
-    int32_t hyperbola_radius_milli;
-    int32_t hyperbola_slope_micro_per_step;
-} IAFocusModel;
+    uint32_t star_limit;
+    uint32_t point_count;
+    uint32_t focus_increment;
+    uint32_t target_minimum_peak_adu;
+    uint32_t target_maximum_peak_adu;
+    uint32_t minimum_exposure_ms;
+    uint32_t maximum_exposure_ms;
+    uint32_t initial_maximum_change_milli;
+    uint32_t step_maximum_change_milli;
+    uint32_t maximum_retries;
+    uint32_t roi_margin_pixels;
+    uint32_t search_radius_pixels;
+    uint32_t reject_star_flags;
+    uint32_t minimum_branch_points;
+    uint32_t maximum_residual_milli;
+} IAFocusConfig;
 
-typedef struct IAFocusSample {
+typedef struct IAFocusRequest {
+    uint32_t struct_size;
+    uint32_t action;
+    uint32_t reason_flags;
     int32_t focus_position;
-    int32_t metric_milli;
-    uint32_t weight_milli;
-    uint32_t flags;
-} IAFocusSample;
+    uint32_t exposure_milliseconds;
+    IARect roi;
+} IAFocusRequest;
 
-typedef struct IAFocusFit {
+typedef struct IAFocusResult {
     uint32_t struct_size;
+    uint32_t stars_locked;
+    uint32_t stars_fitted;
     int32_t focus_milli_steps;
-    int32_t vertical_offset_milli;
-    int32_t rms_residual_milli;
-    uint32_t points_used;
-    uint32_t points_left;
-    uint32_t points_right;
-    uint32_t flags;
-} IAFocusFit;
-
-typedef struct IAFocusSummary {
-    uint32_t struct_size;
-    uint32_t fits_included;
-    int32_t median_focus_milli_steps;
     int32_t mad_focus_milli_steps;
     int32_t median_rms_residual_milli;
-} IAFocusSummary;
+    uint32_t recommended_exposure_milliseconds;
+} IAFocusResult;
+
+typedef struct IAFocusDiagnostic {
+    uint32_t struct_size;
+    uint32_t stars_measured;
+    uint32_t saturated_stars;
+    int32_t median_hfd_milli_pixels;
+    int32_t mad_hfd_milli_pixels;
+} IAFocusDiagnostic;
 
 IA_EXPORT uint32_t IA_CALL IA_Version(void);
 IA_EXPORT void IA_CALL IA_SetDebug(uint32_t enabled);
@@ -211,19 +226,6 @@ IA_EXPORT int IA_CALL IA_RecommendExposure(
     uint32_t maximum_change_milli,
     uint32_t *recommended_milliseconds);
 
-IA_EXPORT int IA_CALL IA_RecommendFocusExposure(
-    uint32_t current_milliseconds,
-    const IAStar *measurements,
-    const IAStar *previous_measurements,
-    uint32_t star_count,
-    uint32_t target_minimum_peak_adu,
-    uint32_t target_maximum_peak_adu,
-    uint32_t minimum_milliseconds,
-    uint32_t maximum_milliseconds,
-    uint32_t maximum_change_milli,
-    uint32_t *better_focus_milliseconds,
-    uint32_t *worse_focus_milliseconds);
-
 IA_EXPORT int IA_CALL IA_ComputeStarROI(
     const IAStar *stars,
     uint32_t star_count,
@@ -232,21 +234,47 @@ IA_EXPORT int IA_CALL IA_ComputeStarROI(
     uint32_t margin_pixels,
     IARect *roi);
 
-IA_EXPORT int IA_CALL IA_FitFocusModel(
-    const IAFocusModel *model,
-    const IAFocusSample *samples,
-    uint32_t sample_count,
-    uint32_t reject_sample_flags,
-    uint32_t resolution_milli_steps,
-    IAFocusFit *fit);
+IA_EXPORT uint32_t IA_CALL IA_FocusRunBytes(void);
+IA_EXPORT void IA_CALL IA_DefaultFocusConfig(IAFocusConfig *config);
 
-IA_EXPORT int IA_CALL IA_CombineFocusFits(
-    const IAFocusFit *fits,
-    uint32_t fit_count,
-    uint32_t reject_fit_flags,
-    void *workspace,
-    uint32_t workspace_bytes,
-    IAFocusSummary *summary);
+IA_EXPORT int IA_CALL IA_BeginFocusRun(
+    void *run,
+    uint32_t run_bytes,
+    const IAFocusConfig *focus_config,
+    const IAConfig *analysis_config,
+    const uint16_t *pixels,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels,
+    int32_t center_focus_position,
+    uint32_t exposure_milliseconds,
+    IAFocusRequest *request);
+
+IA_EXPORT int IA_CALL IA_SubmitFocusFrame(
+    void *run,
+    const uint16_t *pixels,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels,
+    int32_t origin_x,
+    int32_t origin_y,
+    int32_t focus_position,
+    uint32_t exposure_milliseconds,
+    IAFocusRequest *request);
+
+IA_EXPORT int IA_CALL IA_EndFocusRun(
+    void *run,
+    IAFocusResult *result);
+
+IA_EXPORT int IA_CALL IA_DiagnoseFocusFrame(
+    void *run,
+    const uint16_t *pixels,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels,
+    int32_t origin_x,
+    int32_t origin_y,
+    IAFocusDiagnostic *diagnostic);
 
 #ifdef __cplusplus
 }

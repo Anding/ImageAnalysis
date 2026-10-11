@@ -29,25 +29,28 @@ Extern: int "C" IA_RecommendExposure(
     int target_peak_adu, int minimum_milliseconds, int maximum_milliseconds,
     int maximum_change_milli, int * recommended_milliseconds
 ) ;
-Extern: int "C" IA_RecommendFocusExposure(
-    int current_milliseconds, int * measurements,
-    int * previous_measurements, int star_count,
-    int target_minimum_peak_adu, int target_maximum_peak_adu,
-    int minimum_milliseconds, int maximum_milliseconds,
-    int maximum_change_milli, int * better_focus_milliseconds,
-    int * worse_focus_milliseconds
-) ;
 Extern: int "C" IA_ComputeStarROI(
     int * stars, int star_count, int image_width, int image_height,
     int margin_pixels, int * roi
 ) ;
-Extern: int "C" IA_FitFocusModel(
-    int * model, int * samples, int sample_count, int reject_sample_flags,
-    int resolution_milli_steps, int * fit
+Extern: int "C" IA_FocusRunBytes() ;
+Extern: void "C" IA_DefaultFocusConfig( int * config ) ;
+Extern: int "C" IA_BeginFocusRun(
+    int * run, int run_bytes, int * focus_config, int * analysis_config,
+    int * pixels, int width, int height, int stride_pixels,
+    int center_focus_position, int exposure_milliseconds, int * request
 ) ;
-Extern: int "C" IA_CombineFocusFits(
-    int * fits, int fit_count, int reject_fit_flags,
-    int * workspace, int workspace_bytes, int * summary
+Extern: int "C" IA_SubmitFocusFrame(
+    int * run, int * pixels, int width, int height, int stride_pixels,
+    int origin_x, int origin_y, int focus_position,
+    int exposure_milliseconds, int * request
+) ;
+Extern: int "C" IA_EndFocusRun(
+    int * run, int * result
+) ;
+Extern: int "C" IA_DiagnoseFocusFrame(
+    int * run, int * pixels, int width, int height, int stride_pixels,
+    int origin_x, int origin_y, int * diagnostic
 ) ;
 
 0  constant IA.OK
@@ -125,48 +128,63 @@ BEGIN-STRUCTURE <IA_RECT>
     4 +FIELD IA_RECT.height
 END-STRUCTURE
 
-1 constant IA.FOCUS.PIECEWISE_V
-2 constant IA.FOCUS.HYPERBOLA
+1 constant IA.FOCUS.CAPTURE
+2 constant IA.FOCUS.RETAKE
+3 constant IA.FOCUS.COMPLETE
+4 constant IA.FOCUS.FAILED
 
-1 constant IA.FOCUS.INSUFFICIENT_POINTS
-2 constant IA.FOCUS.ONE_SIDED
-4 constant IA.FOCUS.AT_BOUNDARY
-8 constant IA.FOCUS.INVALID_MODEL
+1 constant IA.FOCUS.SATURATED
+2 constant IA.FOCUS.TOO_FAINT
+4 constant IA.FOCUS.NO_STARS
+8 constant IA.FOCUS.NO_CURVE
 
-BEGIN-STRUCTURE <IA_FOCUS_MODEL>
-    4 +FIELD IA_FOCUS_MODEL.struct_size
-    4 +FIELD IA_FOCUS_MODEL.kind
-    4 +FIELD IA_FOCUS_MODEL.baseline_milli
-    4 +FIELD IA_FOCUS_MODEL.left_slope_micro_per_step
-    4 +FIELD IA_FOCUS_MODEL.right_slope_micro_per_step
-    4 +FIELD IA_FOCUS_MODEL.hyperbola_radius_milli
-    4 +FIELD IA_FOCUS_MODEL.hyperbola_slope_micro_per_step
+BEGIN-STRUCTURE <IA_FOCUS_CONFIG>
+    4 +FIELD IA_FOCUS_CONFIG.struct_size
+    4 +FIELD IA_FOCUS_CONFIG.star_limit
+    4 +FIELD IA_FOCUS_CONFIG.point_count
+    4 +FIELD IA_FOCUS_CONFIG.focus_increment
+    4 +FIELD IA_FOCUS_CONFIG.target_minimum_peak_adu
+    4 +FIELD IA_FOCUS_CONFIG.target_maximum_peak_adu
+    4 +FIELD IA_FOCUS_CONFIG.minimum_exposure_ms
+    4 +FIELD IA_FOCUS_CONFIG.maximum_exposure_ms
+    4 +FIELD IA_FOCUS_CONFIG.initial_maximum_change_milli
+    4 +FIELD IA_FOCUS_CONFIG.step_maximum_change_milli
+    4 +FIELD IA_FOCUS_CONFIG.maximum_retries
+    4 +FIELD IA_FOCUS_CONFIG.roi_margin_pixels
+    4 +FIELD IA_FOCUS_CONFIG.search_radius_pixels
+    4 +FIELD IA_FOCUS_CONFIG.reject_star_flags
+    4 +FIELD IA_FOCUS_CONFIG.minimum_branch_points
+    4 +FIELD IA_FOCUS_CONFIG.maximum_residual_milli
 END-STRUCTURE
 
-BEGIN-STRUCTURE <IA_FOCUS_SAMPLE>
-    4 +FIELD IA_FOCUS_SAMPLE.focus_position
-    4 +FIELD IA_FOCUS_SAMPLE.metric_milli
-    4 +FIELD IA_FOCUS_SAMPLE.weight_milli
-    4 +FIELD IA_FOCUS_SAMPLE.flags
+BEGIN-STRUCTURE <IA_FOCUS_REQUEST>
+    4 +FIELD IA_FOCUS_REQUEST.struct_size
+    4 +FIELD IA_FOCUS_REQUEST.action
+    4 +FIELD IA_FOCUS_REQUEST.reason_flags
+    4 +FIELD IA_FOCUS_REQUEST.focus_position
+    4 +FIELD IA_FOCUS_REQUEST.exposure_milliseconds
+    4 +FIELD IA_FOCUS_REQUEST.roi_x
+    4 +FIELD IA_FOCUS_REQUEST.roi_y
+    4 +FIELD IA_FOCUS_REQUEST.roi_width
+    4 +FIELD IA_FOCUS_REQUEST.roi_height
 END-STRUCTURE
 
-BEGIN-STRUCTURE <IA_FOCUS_FIT>
-    4 +FIELD IA_FOCUS_FIT.struct_size
-    4 +FIELD IA_FOCUS_FIT.focus_milli_steps
-    4 +FIELD IA_FOCUS_FIT.vertical_offset_milli
-    4 +FIELD IA_FOCUS_FIT.rms_residual_milli
-    4 +FIELD IA_FOCUS_FIT.points_used
-    4 +FIELD IA_FOCUS_FIT.points_left
-    4 +FIELD IA_FOCUS_FIT.points_right
-    4 +FIELD IA_FOCUS_FIT.flags
+BEGIN-STRUCTURE <IA_FOCUS_RESULT>
+    4 +FIELD IA_FOCUS_RESULT.struct_size
+    4 +FIELD IA_FOCUS_RESULT.stars_locked
+    4 +FIELD IA_FOCUS_RESULT.stars_fitted
+    4 +FIELD IA_FOCUS_RESULT.focus_milli_steps
+    4 +FIELD IA_FOCUS_RESULT.mad_focus_milli_steps
+    4 +FIELD IA_FOCUS_RESULT.median_rms_residual_milli
+    4 +FIELD IA_FOCUS_RESULT.recommended_exposure_milliseconds
 END-STRUCTURE
 
-BEGIN-STRUCTURE <IA_FOCUS_SUMMARY>
-    4 +FIELD IA_FOCUS_SUMMARY.struct_size
-    4 +FIELD IA_FOCUS_SUMMARY.fits_included
-    4 +FIELD IA_FOCUS_SUMMARY.median_focus_milli_steps
-    4 +FIELD IA_FOCUS_SUMMARY.mad_focus_milli_steps
-    4 +FIELD IA_FOCUS_SUMMARY.median_rms_residual_milli
+BEGIN-STRUCTURE <IA_FOCUS_DIAGNOSTIC>
+    4 +FIELD IA_FOCUS_DIAGNOSTIC.struct_size
+    4 +FIELD IA_FOCUS_DIAGNOSTIC.stars_measured
+    4 +FIELD IA_FOCUS_DIAGNOSTIC.saturated_stars
+    4 +FIELD IA_FOCUS_DIAGNOSTIC.median_hfd_milli_pixels
+    4 +FIELD IA_FOCUS_DIAGNOSTIC.mad_hfd_milli_pixels
 END-STRUCTURE
 
 256 constant IA.MAX_STARS
@@ -219,8 +237,6 @@ ia.config IA_DefaultConfig
 ;
 
 variable ia.recommended-exposure
-variable ia.better-focus-exposure
-variable ia.worse-focus-exposure
 
 : ia.recommend-exposure
     { current-ms peak background target min-ms max-ms max-change-milli
@@ -229,17 +245,6 @@ variable ia.worse-focus-exposure
     ia.recommended-exposure
     IA_RecommendExposure
     ia.recommended-exposure @ swap
-;
-
-: ia.recommend-focus-exposure
-    { current-ms measurements previous-measurements count
-      target-min target-max min-ms max-ms max-change-milli
-      -- better-ms worse-ms status }
-    current-ms measurements previous-measurements count
-    target-min target-max min-ms max-ms max-change-milli
-    ia.better-focus-exposure ia.worse-focus-exposure
-    IA_RecommendFocusExposure
-    ia.better-focus-exposure @ ia.worse-focus-exposure @ rot
 ;
 
 create ia.roi <IA_RECT> allot
@@ -251,17 +256,47 @@ create ia.roi <IA_RECT> allot
     ia.roi swap
 ;
 
-: ia.fit-focus
-    { model samples count reject-flags resolution fit -- status }
-    <IA_FOCUS_FIT> fit IA_FOCUS_FIT.struct_size !
-    model samples count reject-flags resolution fit IA_FitFocusModel
+: ia.begin-focus
+    { run run-bytes focus-config img center-focus exposure-ms request
+      -- status }
+    <IA_FOCUS_REQUEST> request IA_FOCUS_REQUEST.struct_size !
+    run run-bytes focus-config ia.config
+    img FRAME_BITMAP
+    img FRAME_WIDTH @
+    img FRAME_HEIGHT @
+    img FRAME_WIDTH @
+    center-focus exposure-ms request
+    IA_BeginFocusRun
 ;
 
-: ia.combine-focus
-    { fits count reject-flags summary -- status }
-    <IA_FOCUS_SUMMARY> summary IA_FOCUS_SUMMARY.struct_size !
-    fits count reject-flags ia.workspace ia.workspace.bytes summary
-    IA_CombineFocusFits
+: ia.submit-focus
+    { run img origin-x origin-y focus exposure-ms request -- status }
+    <IA_FOCUS_REQUEST> request IA_FOCUS_REQUEST.struct_size !
+    run
+    img FRAME_BITMAP
+    img FRAME_WIDTH @
+    img FRAME_HEIGHT @
+    img FRAME_WIDTH @
+    origin-x origin-y focus exposure-ms request
+    IA_SubmitFocusFrame
+;
+
+: ia.end-focus { run result -- status }
+    <IA_FOCUS_RESULT> result IA_FOCUS_RESULT.struct_size !
+    run result IA_EndFocusRun
+;
+
+: ia.diagnose-focus
+    { run img origin-x origin-y diagnostic -- status }
+    <IA_FOCUS_DIAGNOSTIC>
+        diagnostic IA_FOCUS_DIAGNOSTIC.struct_size !
+    run
+    img FRAME_BITMAP
+    img FRAME_WIDTH @
+    img FRAME_HEIGHT @
+    img FRAME_WIDTH @
+    origin-x origin-y diagnostic
+    IA_DiagnoseFocusFrame
 ;
 
 : ia.add-FITS { img | map -- }

@@ -33,60 +33,17 @@ native.test.background
 32 31 native.test.star
 native.test.frame compute-imageStats
 
-create native.test.model <IA_FOCUS_MODEL> allot
-<IA_FOCUS_MODEL> native.test.model IA_FOCUS_MODEL.struct_size !
-IA.FOCUS.PIECEWISE_V native.test.model IA_FOCUS_MODEL.kind !
-38000 native.test.model IA_FOCUS_MODEL.left_slope_micro_per_step !
-42000 native.test.model IA_FOCUS_MODEL.right_slope_micro_per_step !
-
-create native.test.samples <IA_FOCUS_SAMPLE> 3 * allot
-
-: native.test.sample { focus metric index -- }
-    focus index <IA_FOCUS_SAMPLE> * native.test.samples +
-        IA_FOCUS_SAMPLE.focus_position !
-    metric index <IA_FOCUS_SAMPLE> * native.test.samples +
-        IA_FOCUS_SAMPLE.metric_milli !
-    1000 index <IA_FOCUS_SAMPLE> * native.test.samples +
-        IA_FOCUS_SAMPLE.weight_milli !
-;
-
-4980 3520 0 native.test.sample
-5020 2000 1 native.test.sample
-5060 3680 2 native.test.sample
-create native.test.fit <IA_FOCUS_FIT> allot
 create native.test.measurement <IA_STAR> allot
-create native.test.focus-stars <IA_STAR> 2 * allot
-create native.test.previous-focus-stars <IA_STAR> 2 * allot
-
-: native.test.focus-exposure
-    { current-hfd previous-hfd -- better-ms worse-ms status }
-    native.test.focus-stars <IA_STAR> 2 * erase
-    native.test.previous-focus-stars <IA_STAR> 2 * erase
-    31000 native.test.focus-stars IA_STAR.peak_adu !
-    1000000 native.test.focus-stars
-        IA_STAR.background_milli_adu !
-    current-hfd native.test.focus-stars
-        IA_STAR.hfd_milli_pixels !
-    previous-hfd native.test.previous-focus-stars
-        IA_STAR.hfd_milli_pixels !
-    26000 native.test.focus-stars <IA_STAR> +
-        IA_STAR.peak_adu !
-    1000000 native.test.focus-stars <IA_STAR> +
-        IA_STAR.background_milli_adu !
-    current-hfd 1000 + native.test.focus-stars <IA_STAR> +
-        IA_STAR.hfd_milli_pixels !
-    previous-hfd 1000 + native.test.previous-focus-stars <IA_STAR> +
-        IA_STAR.hfd_milli_pixels !
-    4000
-    native.test.focus-stars
-    native.test.previous-focus-stars
-    2 20000 50000 100 10000 2000
-    ia.recommend-focus-exposure
-;
+create native.test.focus-config <IA_FOCUS_CONFIG> allot
+native.test.focus-config IA_DefaultFocusConfig
+1 native.test.focus-config IA_FOCUS_CONFIG.star_limit !
+create native.test.focus-request <IA_FOCUS_REQUEST> allot
+IA_FocusRunBytes constant native.test.focus-run-bytes
+native.test.focus-run-bytes allocate throw constant native.test.focus-run
 
 Tstart
-T{ IA_Version }T 1 ==
-T{ ia.debug-on ia.debug-off IA_Version }T 1 ==
+T{ IA_Version }T 2 ==
+T{ ia.debug-on ia.debug-off IA_Version }T 2 ==
 T{ ia.summary IA_FRAME_SUMMARY.detected_stars @ 0> }T -1 ==
 T{ ia.summary IA_FRAME_SUMMARY.included_stars @ }T 1 ==
 T{ 0 ia.star IA_STAR.x_milli @ 31000 33000 within }T -1 ==
@@ -94,17 +51,19 @@ T{ 0 ia.star IA_STAR.y_milli @ 30000 32000 within }T -1 ==
 T{ s" NSTARS" native.test.frame FRAME_METADATA @ >string hashS }T s" 1" hashS ==
 T{ s" HFD" native.test.frame FRAME_METADATA @ >string nip 0> }T -1 ==
 T{ 1000 21000 1000 41000 100 10000 4000 ia.recommend-exposure }T 2000 0 ==
-T{ 6000 8000 native.test.focus-exposure drop
-    swap 4000 < swap 4000 > and }T -1 ==
 T{ 0 ia.star 1 64 64 5 ia.compute-roi
     swap IA_RECT.width @ swap }T 11 0 ==
 T{ native.test.frame 0 ia.star 1 5 native.test.measurement
     ia.measure-locked }T 0 ==
 T{ native.test.measurement IA_STAR.hfd_milli_pixels @ 0> }T -1 ==
-T{ native.test.model native.test.samples 3 0 250 native.test.fit
-    ia.fit-focus }T 0 ==
-T{ native.test.fit IA_FOCUS_FIT.focus_milli_steps @
-    5019000 5021001 within }T -1 ==
+T{ native.test.focus-run native.test.focus-run-bytes
+    native.test.focus-config native.test.frame 5000 1000
+    native.test.focus-request ia.begin-focus }T 0 ==
+T{ native.test.focus-request IA_FOCUS_REQUEST.action @
+    }T IA.FOCUS.CAPTURE ==
+T{ native.test.focus-request IA_FOCUS_REQUEST.roi_width @ 0>
+    }T -1 ==
 Tend
 
+native.test.focus-run free throw
 native.test.frame free-frame

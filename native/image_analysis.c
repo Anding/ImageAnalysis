@@ -5,7 +5,7 @@
  *   1. IA_AnalyzeFrame estimates the global background and finds stars.
  *   2. IA_ComputeStarROI chooses a sensor rectangle around selected stars.
  *   3. IA_MeasureLockedStars follows those same stars through a focus sweep.
- *   4. IA_FitFocusModel combines their weighted samples into one focus result.
+ *   4. A stateful focus run fits intersecting branches and combines stars.
  *
  * Callers own both image memory and workspace memory.  This keeps allocation
  * and hardware policy in Forth while this file remains a deterministic
@@ -1083,132 +1083,6 @@ static uint32_t ia_exposure_from_range(
     return ia_clamp_u32(recommended);
 }
 
-int IA_CALL IA_RecommendFocusExposure(
-    uint32_t current_milliseconds,
-    const IAStar *measurements,
-    const IAStar *previous_measurements,
-    uint32_t star_count,
-    uint32_t target_minimum_peak_adu,
-    uint32_t target_maximum_peak_adu,
-    uint32_t minimum_milliseconds,
-    uint32_t maximum_milliseconds,
-    uint32_t maximum_change_milli,
-    uint32_t *better_focus_milliseconds,
-    uint32_t *worse_focus_milliseconds)
-{
-    double better_minimum = 0.0;
-    double better_maximum = HUGE_VAL;
-    double worse_minimum = 0.0;
-    double worse_maximum = HUGE_VAL;
-    double maximum_ratio;
-    uint32_t usable = 0u;
-    uint32_t i;
-
-    ia_debug_log(
-        "IA_RecommendFocusExposure enter current=%u stars=%u target=%u-%u",
-        current_milliseconds, star_count,
-        target_minimum_peak_adu, target_maximum_peak_adu);
-    if (measurements == NULL || better_focus_milliseconds == NULL ||
-        worse_focus_milliseconds == NULL || current_milliseconds == 0u ||
-        star_count == 0u ||
-        target_minimum_peak_adu >= target_maximum_peak_adu ||
-        maximum_milliseconds < minimum_milliseconds ||
-        maximum_change_milli < IA_MILLI) {
-        ia_debug_log("IA_RecommendFocusExposure invalid argument");
-        return IA_INVALID_ARGUMENT;
-    }
-
-    for (i = 0u; i < star_count; ++i) {
-        double background =
-            measurements[i].background_milli_adu / (double)IA_MILLI;
-        double current_hfd = measurements[i].hfd_milli_pixels;
-        double hfd_change = 0.0;
-        double better_hfd;
-        double worse_hfd;
-        double measured_signal;
-        double target_minimum_signal;
-        double target_maximum_signal;
-        double exposure_scale;
-        double better_star_minimum;
-        double better_star_maximum;
-        double worse_star_minimum;
-        double worse_star_maximum;
-
-        if (background < 0.0) background = 0.0;
-        if (current_hfd <= 0.0 || measurements[i].peak_adu <= background) {
-            continue;
-        }
-        if (previous_measurements != NULL &&
-            previous_measurements[i].hfd_milli_pixels > 0) {
-            hfd_change = fabs(
-                current_hfd -
-                previous_measurements[i].hfd_milli_pixels);
-        }
-        better_hfd = fmax(current_hfd * 0.5, current_hfd - hfd_change);
-        worse_hfd = fmin(current_hfd * 2.0, current_hfd + hfd_change);
-        measured_signal = measurements[i].peak_adu - background;
-        target_minimum_signal = target_minimum_peak_adu - background;
-        target_maximum_signal = target_maximum_peak_adu - background;
-        if (target_minimum_signal <= 0.0 ||
-            target_maximum_signal <= target_minimum_signal) {
-            continue;
-        }
-
-        exposure_scale =
-            current_milliseconds /
-            (measured_signal * current_hfd * current_hfd);
-        better_star_minimum =
-            exposure_scale * target_minimum_signal *
-            better_hfd * better_hfd;
-        better_star_maximum =
-            exposure_scale * target_maximum_signal *
-            better_hfd * better_hfd;
-        worse_star_minimum =
-            exposure_scale * target_minimum_signal *
-            worse_hfd * worse_hfd;
-        worse_star_maximum =
-            exposure_scale * target_maximum_signal *
-            worse_hfd * worse_hfd;
-        if (better_star_minimum > better_minimum) {
-            better_minimum = better_star_minimum;
-        }
-        if (better_star_maximum < better_maximum) {
-            better_maximum = better_star_maximum;
-        }
-        if (worse_star_minimum > worse_minimum) {
-            worse_minimum = worse_star_minimum;
-        }
-        if (worse_star_maximum < worse_maximum) {
-            worse_maximum = worse_star_maximum;
-        }
-        ++usable;
-        ia_debug_log(
-            "IA_RecommendFocusExposure star=%u peak=%u hfd=%d better_hfd=%.0f better_range=%.0f-%.0f worse_hfd=%.0f worse_range=%.0f-%.0f",
-            i, measurements[i].peak_adu,
-            measurements[i].hfd_milli_pixels,
-            better_hfd, better_star_minimum, better_star_maximum,
-            worse_hfd, worse_star_minimum, worse_star_maximum);
-    }
-    if (usable == 0u) {
-        ia_debug_log("IA_RecommendFocusExposure no usable stars");
-        return IA_NO_STARS;
-    }
-
-    maximum_ratio = (double)maximum_change_milli / IA_MILLI;
-    *better_focus_milliseconds = ia_exposure_from_range(
-        current_milliseconds, better_minimum, better_maximum,
-        minimum_milliseconds, maximum_milliseconds, maximum_ratio);
-    *worse_focus_milliseconds = ia_exposure_from_range(
-        current_milliseconds, worse_minimum, worse_maximum,
-        minimum_milliseconds, maximum_milliseconds, maximum_ratio);
-    ia_debug_log(
-        "IA_RecommendFocusExposure exit usable=%u better=%.0f-%.0f/%u worse=%.0f-%.0f/%u",
-        usable,
-        better_minimum, better_maximum, *better_focus_milliseconds,
-        worse_minimum, worse_maximum, *worse_focus_milliseconds);
-    return IA_OK;
-}
-
 int IA_CALL IA_ComputeStarROI(
     const IAStar *stars,
     uint32_t star_count,
@@ -1263,221 +1137,695 @@ int IA_CALL IA_ComputeStarROI(
     return IA_OK;
 }
 
-static double ia_focus_shape(const IAFocusModel *model, double delta_steps)
+#define IA_FOCUS_MAGIC 0x49414632u
+#define IA_FOCUS_CANDIDATES 64u
+
+typedef struct IAFocusPoint {
+    int32_t focus_position;
+    int32_t hfd_milli_pixels;
+    uint32_t flags;
+} IAFocusPoint;
+
+typedef struct IALine {
+    double intercept;
+    double slope;
+} IALine;
+
+typedef struct IAVFit {
+    int32_t focus_milli_steps;
+    int32_t rms_residual_milli;
+} IAVFit;
+
+typedef struct IAFocusRun {
+    uint32_t magic;
+    IAFocusConfig config;
+    IAConfig analysis_config;
+    IAStar candidates[IA_FOCUS_CANDIDATES];
+    IAStar locked[IA_FOCUS_MAX_STARS];
+    IAStar measurements[IA_FOCUS_MAX_STARS];
+    IAStar previous[IA_FOCUS_MAX_STARS];
+    IAFocusPoint points[IA_FOCUS_MAX_STARS][IA_FOCUS_MAX_POINTS];
+    IARect roi;
+    IAFocusResult result;
+    int32_t center_focus;
+    int32_t first_focus;
+    uint32_t star_count;
+    uint32_t point_index;
+    uint32_t retry_count;
+    uint32_t previous_valid;
+    uint32_t last_exposure_ms;
+} IAFocusRun;
+
+static int ia_focus_config_valid(const IAFocusConfig *config)
 {
-    if (model->kind == IA_FOCUS_PIECEWISE_V) {
-        double slope_micro = delta_steps < 0.0 ?
-            model->left_slope_micro_per_step :
-            model->right_slope_micro_per_step;
-        return model->baseline_milli +
-            fabs(delta_steps) * slope_micro / IA_MILLI;
-    }
-    if (model->kind == IA_FOCUS_HYPERBOLA) {
-        double slope_metric = delta_steps *
-            model->hyperbola_slope_micro_per_step / IA_MILLI;
-        double radius = model->hyperbola_radius_milli;
-        return model->baseline_milli +
-            sqrt(radius * radius + slope_metric * slope_metric);
-    }
-    return 0.0;
+    return config != NULL &&
+        config->struct_size >= sizeof(*config) &&
+        config->star_limit > 0u &&
+        config->star_limit <= IA_FOCUS_MAX_STARS &&
+        config->point_count >= 2u * config->minimum_branch_points &&
+        config->point_count <= IA_FOCUS_MAX_POINTS &&
+        (config->point_count & 1u) != 0u &&
+        config->focus_increment > 0u &&
+        config->target_minimum_peak_adu <
+            config->target_maximum_peak_adu &&
+        config->minimum_exposure_ms > 0u &&
+        config->minimum_exposure_ms <= config->maximum_exposure_ms &&
+        config->initial_maximum_change_milli >= IA_MILLI &&
+        config->step_maximum_change_milli >= IA_MILLI &&
+        config->minimum_branch_points >= 2u;
 }
 
-static int ia_valid_focus_model(const IAFocusModel *model)
+static void ia_focus_request(
+    IAFocusRun *run,
+    IAFocusRequest *request,
+    uint32_t action,
+    uint32_t reason_flags,
+    int32_t focus_position,
+    uint32_t exposure_milliseconds)
 {
-    if (model == NULL || model->struct_size < sizeof(*model)) {
-        return 0;
-    }
-    if (model->kind == IA_FOCUS_PIECEWISE_V) {
-        return model->left_slope_micro_per_step > 0 &&
-            model->right_slope_micro_per_step > 0;
-    }
-    if (model->kind == IA_FOCUS_HYPERBOLA) {
-        return model->hyperbola_radius_milli > 0 &&
-            model->hyperbola_slope_micro_per_step > 0;
-    }
-    return 0;
+    memset(request, 0, sizeof(*request));
+    request->struct_size = sizeof(*request);
+    request->action = action;
+    request->reason_flags = reason_flags;
+    request->focus_position = focus_position;
+    request->exposure_milliseconds = exposure_milliseconds;
+    request->roi = run->roi;
+    ia_debug_log(
+        "focus request action=%u reason=%u focus=%d exposure=%u roi=(%d,%d %dx%d)",
+        action, reason_flags, focus_position, exposure_milliseconds,
+        request->roi.x, request->roi.y,
+        request->roi.width, request->roi.height);
 }
 
-int IA_CALL IA_FitFocusModel(
-    const IAFocusModel *model,
-    const IAFocusSample *samples,
-    uint32_t sample_count,
-    uint32_t reject_sample_flags,
-    uint32_t resolution_milli_steps,
-    IAFocusFit *fit)
+static int ia_focus_exposure(
+    const IAFocusRun *run,
+    const IAStar *measurements,
+    const IAStar *previous,
+    uint32_t current_milliseconds,
+    uint32_t maximum_change_milli,
+    int improving,
+    uint32_t *recommended_milliseconds)
 {
-    int32_t minimum_position = INT32_MAX;
-    int32_t maximum_position = INT32_MIN;
-    int64_t first_center;
-    int64_t last_center;
-    int64_t center;
-    int64_t best_center = 0;
-    double best_offset = 0.0;
-    double best_error = HUGE_VAL;
-    uint32_t used = 0u;
+    double required_minimum = 0.0;
+    double allowed_maximum = HUGE_VAL;
+    uint32_t usable = 0u;
     uint32_t i;
 
-    ia_debug_log(
-        "IA_FitFocusModel enter kind=%u samples=%u reject=%u resolution=%u",
-        model == NULL ? 0u : model->kind, sample_count,
-        reject_sample_flags, resolution_milli_steps);
-    if (samples == NULL || fit == NULL || fit->struct_size < sizeof(*fit) ||
-        sample_count == 0u || resolution_milli_steps == 0u) {
-        ia_debug_log("IA_FitFocusModel invalid argument");
-        return IA_INVALID_ARGUMENT;
-    }
-    memset(fit, 0, sizeof(*fit));
-    fit->struct_size = sizeof(*fit);
-    if (!ia_valid_focus_model(model)) {
-        fit->flags = IA_FOCUS_INVALID_MODEL;
-        ia_debug_log("IA_FitFocusModel invalid model");
-        return IA_INVALID_ARGUMENT;
-    }
+    for (i = 0u; i < run->star_count; ++i) {
+        double background =
+            measurements[i].background_milli_adu / (double)IA_MILLI;
+        double current_hfd = measurements[i].hfd_milli_pixels;
+        double predicted_hfd = current_hfd;
+        double measured_signal;
+        double target_minimum_signal;
+        double target_maximum_signal;
+        double exposure_scale;
+        double star_minimum;
+        double star_maximum;
 
-    for (i = 0u; i < sample_count; ++i) {
-        ia_debug_log(
-            "IA_FitFocusModel sample=%u focus=%d metric=%d weight=%u flags=%u",
-            i, samples[i].focus_position, samples[i].metric_milli,
-            samples[i].weight_milli, samples[i].flags);
-        if ((samples[i].flags & reject_sample_flags) == 0u &&
-            samples[i].weight_milli > 0u) {
-            if (samples[i].focus_position < minimum_position) {
-                minimum_position = samples[i].focus_position;
-            }
-            if (samples[i].focus_position > maximum_position) {
-                maximum_position = samples[i].focus_position;
-            }
-            ++used;
+        if (background < 0.0) background = 0.0;
+        if (current_hfd <= 0.0 || measurements[i].peak_adu <= background) {
+            continue;
         }
+        if (previous != NULL && previous[i].hfd_milli_pixels > 0) {
+            double change = fabs(
+                current_hfd - previous[i].hfd_milli_pixels);
+            predicted_hfd = improving ?
+                fmax(current_hfd * 0.5, current_hfd - change) :
+                fmin(current_hfd * 2.0, current_hfd + change);
+        }
+        measured_signal = measurements[i].peak_adu - background;
+        target_minimum_signal =
+            run->config.target_minimum_peak_adu - background;
+        target_maximum_signal =
+            run->config.target_maximum_peak_adu - background;
+        if (target_minimum_signal <= 0.0 ||
+            target_maximum_signal <= target_minimum_signal) {
+            continue;
+        }
+        exposure_scale =
+            current_milliseconds /
+            (measured_signal * current_hfd * current_hfd);
+        star_minimum =
+            exposure_scale * target_minimum_signal *
+            predicted_hfd * predicted_hfd;
+        star_maximum =
+            exposure_scale * target_maximum_signal *
+            predicted_hfd * predicted_hfd;
+        if (star_minimum > required_minimum) required_minimum = star_minimum;
+        if (star_maximum < allowed_maximum) allowed_maximum = star_maximum;
+        ++usable;
     }
-    fit->points_used = used;
-    if (used < 3u || minimum_position >= maximum_position) {
-        fit->flags = IA_FOCUS_INSUFFICIENT_POINTS;
-        ia_debug_log("IA_FitFocusModel insufficient points used=%u", used);
+    if (usable == 0u) {
         return IA_NO_STARS;
     }
-
-    first_center = (int64_t)minimum_position * IA_MILLI;
-    last_center = (int64_t)maximum_position * IA_MILLI;
-    for (center = first_center; center <= last_center; center += resolution_milli_steps) {
-        double weighted_residual_sum = 0.0;
-        double weighted_squared_residual_sum = 0.0;
-        double weight_sum = 0.0;
-        double squared_error = 0.0;
-        double offset;
-
-        for (i = 0u; i < sample_count; ++i) {
-            if ((samples[i].flags & reject_sample_flags) == 0u &&
-                samples[i].weight_milli > 0u) {
-                double weight = (double)samples[i].weight_milli / IA_MILLI;
-                double delta = samples[i].focus_position - (double)center / IA_MILLI;
-                double shape = ia_focus_shape(model, delta);
-                double residual = samples[i].metric_milli - shape;
-                weighted_residual_sum += weight * residual;
-                weighted_squared_residual_sum += weight * residual * residual;
-                weight_sum += weight;
-            }
-        }
-        offset = weighted_residual_sum / weight_sum;
-        squared_error =
-            weighted_squared_residual_sum / weight_sum - offset * offset;
-        if (squared_error < 0.0) squared_error = 0.0;
-        if (squared_error < best_error) {
-            best_error = squared_error;
-            best_center = center;
-            best_offset = offset;
-        }
-        if (last_center - center < resolution_milli_steps) {
-            break;
-        }
-    }
-
-    fit->focus_milli_steps = best_center > INT32_MAX ? INT32_MAX : (int32_t)best_center;
-    fit->vertical_offset_milli = ia_clamp_i32(best_offset);
-    fit->rms_residual_milli = ia_clamp_i32(sqrt(best_error));
-    for (i = 0u; i < sample_count; ++i) {
-        if ((samples[i].flags & reject_sample_flags) == 0u &&
-            samples[i].weight_milli > 0u) {
-            int64_t sample_focus = (int64_t)samples[i].focus_position * IA_MILLI;
-            if (sample_focus < best_center) ++fit->points_left;
-            if (sample_focus > best_center) ++fit->points_right;
-        }
-    }
-    if (fit->points_left == 0u || fit->points_right == 0u) {
-        fit->flags |= IA_FOCUS_ONE_SIDED;
-    }
-    if (best_center == first_center ||
-        best_center + resolution_milli_steps > last_center) {
-        fit->flags |= IA_FOCUS_AT_BOUNDARY;
-    }
-    ia_debug_log(
-        "IA_FitFocusModel exit focus=%d offset=%d residual=%d used=%u left=%u right=%u flags=%u",
-        fit->focus_milli_steps, fit->vertical_offset_milli,
-        fit->rms_residual_milli, fit->points_used,
-        fit->points_left, fit->points_right, fit->flags);
+    *recommended_milliseconds = ia_exposure_from_range(
+        current_milliseconds, required_minimum, allowed_maximum,
+        run->config.minimum_exposure_ms,
+        run->config.maximum_exposure_ms,
+        (double)maximum_change_milli / IA_MILLI);
     return IA_OK;
 }
 
-int IA_CALL IA_CombineFocusFits(
-    const IAFocusFit *fits,
-    uint32_t fit_count,
-    uint32_t reject_fit_flags,
-    void *workspace,
-    uint32_t workspace_bytes,
-    IAFocusSummary *summary)
+static int ia_lock_compact_stars(IAFocusRun *run, uint32_t measured_stars)
 {
-    int32_t *values;
-    uint32_t included = 0u;
+    uint8_t chosen[IA_FOCUS_CANDIDATES] = { 0 };
+    uint32_t desired;
+    uint32_t first = UINT32_MAX;
+    int32_t left;
+    int32_t right;
+    int32_t top;
+    int32_t bottom;
     uint32_t i;
 
-    ia_debug_log("IA_CombineFocusFits enter fits=%u reject=%u",
-        fit_count, reject_fit_flags);
-    if (fits == NULL || summary == NULL || summary->struct_size < sizeof(*summary)) {
-        ia_debug_log("IA_CombineFocusFits invalid argument");
-        return IA_INVALID_ARGUMENT;
-    }
-    if (fit_count > 0u &&
-        (workspace == NULL || workspace_bytes < fit_count * sizeof(int32_t))) {
-        ia_debug_log("IA_CombineFocusFits workspace too small bytes=%u",
-            workspace_bytes);
-        return IA_WORKSPACE_TOO_SMALL;
-    }
-
-    memset(summary, 0, sizeof(*summary));
-    summary->struct_size = sizeof(*summary);
-    values = (int32_t *)workspace;
-    for (i = 0u; i < fit_count; ++i) {
-        ia_debug_log(
-            "IA_CombineFocusFits fit=%u focus=%d residual=%d points=%u flags=%u",
-            i, fits[i].focus_milli_steps, fits[i].rms_residual_milli,
-            fits[i].points_used, fits[i].flags);
-        if ((fits[i].flags & reject_fit_flags) == 0u) {
-            values[included++] = fits[i].focus_milli_steps;
+    for (i = 0u; i < measured_stars; ++i) {
+        if ((run->candidates[i].flags &
+             run->config.reject_star_flags) == 0u) {
+            first = i;
+            break;
         }
     }
-    summary->fits_included = included;
-    if (included == 0u) {
-        ia_debug_log("IA_CombineFocusFits no included fits");
+    if (first == UINT32_MAX) {
         return IA_NO_STARS;
     }
-    summary->median_focus_milli_steps = ia_median_i32(values, included);
-    for (i = 0u, included = 0u; i < fit_count; ++i) {
-        if ((fits[i].flags & reject_fit_flags) == 0u) {
-            values[included++] = fits[i].focus_milli_steps;
+    desired = run->config.star_limit;
+    run->locked[0] = run->candidates[first];
+    chosen[first] = 1u;
+    run->star_count = 1u;
+    left = right = run->locked[0].x_milli;
+    top = bottom = run->locked[0].y_milli;
+
+    while (run->star_count < desired) {
+        uint32_t best = UINT32_MAX;
+        uint64_t best_area = UINT64_MAX;
+        for (i = 0u; i < measured_stars; ++i) {
+            int32_t candidate_left;
+            int32_t candidate_right;
+            int32_t candidate_top;
+            int32_t candidate_bottom;
+            uint64_t area;
+            if (chosen[i] ||
+                (run->candidates[i].flags &
+                 run->config.reject_star_flags) != 0u) {
+                continue;
+            }
+            candidate_left =
+                run->candidates[i].x_milli < left ?
+                run->candidates[i].x_milli : left;
+            candidate_right =
+                run->candidates[i].x_milli > right ?
+                run->candidates[i].x_milli : right;
+            candidate_top =
+                run->candidates[i].y_milli < top ?
+                run->candidates[i].y_milli : top;
+            candidate_bottom =
+                run->candidates[i].y_milli > bottom ?
+                run->candidates[i].y_milli : bottom;
+            area =
+                (uint64_t)(candidate_right - candidate_left + 1) *
+                (uint64_t)(candidate_bottom - candidate_top + 1);
+            if (area < best_area) {
+                best_area = area;
+                best = i;
+            }
+        }
+        if (best == UINT32_MAX) break;
+        run->locked[run->star_count++] = run->candidates[best];
+        chosen[best] = 1u;
+        if (run->candidates[best].x_milli < left) {
+            left = run->candidates[best].x_milli;
+        }
+        if (run->candidates[best].x_milli > right) {
+            right = run->candidates[best].x_milli;
+        }
+        if (run->candidates[best].y_milli < top) {
+            top = run->candidates[best].y_milli;
+        }
+        if (run->candidates[best].y_milli > bottom) {
+            bottom = run->candidates[best].y_milli;
         }
     }
-    summary->mad_focus_milli_steps = ia_mad_i32(
-        values, included, summary->median_focus_milli_steps);
-    for (i = 0u, included = 0u; i < fit_count; ++i) {
-        if ((fits[i].flags & reject_fit_flags) == 0u) {
-            values[included++] = fits[i].rms_residual_milli;
+    return IA_OK;
+}
+
+static int ia_measure_focus_frame(
+    IAFocusRun *run,
+    const uint16_t *pixels,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels,
+    int32_t origin_x,
+    int32_t origin_y)
+{
+    IAStar local_locked[IA_FOCUS_MAX_STARS];
+    uint32_t i;
+    int status;
+
+    for (i = 0u; i < run->star_count; ++i) {
+        local_locked[i] = run->locked[i];
+        local_locked[i].x_milli -= origin_x * IA_MILLI;
+        local_locked[i].y_milli -= origin_y * IA_MILLI;
+    }
+    status = IA_MeasureLockedStars(
+        pixels, width, height, stride_pixels,
+        &run->analysis_config, local_locked, run->star_count,
+        run->config.search_radius_pixels, run->measurements);
+    if (status != IA_OK) return status;
+    for (i = 0u; i < run->star_count; ++i) {
+        run->locked[i] = run->measurements[i];
+        run->locked[i].x_milli += origin_x * IA_MILLI;
+        run->locked[i].y_milli += origin_y * IA_MILLI;
+    }
+    return IA_OK;
+}
+
+static int ia_regression(
+    const IAFocusPoint *points,
+    uint32_t first,
+    uint32_t count,
+    IALine *line)
+{
+    double sum_x = 0.0;
+    double sum_y = 0.0;
+    double sum_xx = 0.0;
+    double sum_xy = 0.0;
+    double denominator;
+    uint32_t i;
+
+    for (i = first; i < first + count; ++i) {
+        double x = points[i].focus_position;
+        double y = points[i].hfd_milli_pixels;
+        sum_x += x;
+        sum_y += y;
+        sum_xx += x * x;
+        sum_xy += x * y;
+    }
+    denominator = count * sum_xx - sum_x * sum_x;
+    if (denominator == 0.0) return IA_INVALID_ARGUMENT;
+    line->slope =
+        (count * sum_xy - sum_x * sum_y) / denominator;
+    line->intercept = (sum_y - line->slope * sum_x) / count;
+    return IA_OK;
+}
+
+static int ia_fit_v(
+    const IAFocusRun *run,
+    uint32_t star_index,
+    IAVFit *fit)
+{
+    IAFocusPoint valid[IA_FOCUS_MAX_POINTS];
+    double best_error = HUGE_VAL;
+    double best_focus = 0.0;
+    uint32_t count = 0u;
+    uint32_t split;
+    uint32_t i;
+
+    for (i = 0u; i < run->config.point_count; ++i) {
+        const IAFocusPoint *point = &run->points[star_index][i];
+        if ((point->flags & run->config.reject_star_flags) == 0u &&
+            point->hfd_milli_pixels > 0) {
+            valid[count++] = *point;
         }
     }
-    summary->median_rms_residual_milli = ia_median_i32(values, included);
+    if (count < 2u * run->config.minimum_branch_points) {
+        return IA_NO_STARS;
+    }
+
+    for (split = run->config.minimum_branch_points;
+         split + run->config.minimum_branch_points <= count;
+         ++split) {
+        IALine left;
+        IALine right;
+        double focus;
+        double squared_error = 0.0;
+        if (ia_regression(valid, 0u, split, &left) != IA_OK ||
+            ia_regression(valid, split, count - split, &right) != IA_OK ||
+            left.slope >= 0.0 || right.slope <= 0.0 ||
+            left.slope == right.slope) {
+            continue;
+        }
+        focus =
+            (right.intercept - left.intercept) /
+            (left.slope - right.slope);
+        if (focus < valid[split - 1u].focus_position ||
+            focus > valid[split].focus_position) {
+            continue;
+        }
+        for (i = 0u; i < count; ++i) {
+            const IALine *line = i < split ? &left : &right;
+            double residual =
+                valid[i].hfd_milli_pixels -
+                (line->intercept +
+                 line->slope * valid[i].focus_position);
+            squared_error += residual * residual;
+        }
+        squared_error /= count;
+        if (squared_error < best_error) {
+            best_error = squared_error;
+            best_focus = focus;
+        }
+    }
+    if (best_error == HUGE_VAL) {
+        return IA_NO_STARS;
+    }
+    fit->focus_milli_steps = ia_clamp_i32(best_focus * IA_MILLI);
+    fit->rms_residual_milli = ia_clamp_i32(sqrt(best_error));
+    return IA_OK;
+}
+
+static int ia_finish_focus_run(
+    IAFocusRun *run,
+    uint32_t recommended_exposure_ms)
+{
+    int32_t focus_values[IA_FOCUS_MAX_STARS];
+    int32_t residual_values[IA_FOCUS_MAX_STARS];
+    int32_t deviations[IA_FOCUS_MAX_STARS];
+    uint32_t fitted = 0u;
+    uint32_t i;
+
+    for (i = 0u; i < run->star_count; ++i) {
+        IAVFit fit;
+        if (ia_fit_v(run, i, &fit) == IA_OK &&
+            fit.rms_residual_milli <=
+                (int32_t)run->config.maximum_residual_milli) {
+            focus_values[fitted] = fit.focus_milli_steps;
+            residual_values[fitted] = fit.rms_residual_milli;
+            ++fitted;
+        }
+    }
+    memset(&run->result, 0, sizeof(run->result));
+    run->result.struct_size = sizeof(run->result);
+    run->result.stars_locked = run->star_count;
+    run->result.stars_fitted = fitted;
+    run->result.recommended_exposure_milliseconds =
+        recommended_exposure_ms;
+    if (fitted == 0u) return IA_NO_STARS;
+
+    run->result.focus_milli_steps =
+        ia_median_i32(focus_values, fitted);
+    for (i = 0u; i < fitted; ++i) {
+        int64_t difference =
+            (int64_t)focus_values[i] -
+            run->result.focus_milli_steps;
+        if (difference < 0) difference = -difference;
+        deviations[i] =
+            difference > INT32_MAX ? INT32_MAX : (int32_t)difference;
+    }
+    run->result.mad_focus_milli_steps =
+        ia_median_i32(deviations, fitted);
+    run->result.median_rms_residual_milli =
+        ia_median_i32(residual_values, fitted);
     ia_debug_log(
-        "IA_CombineFocusFits exit included=%u focus=%d mad=%d residual=%d",
-        summary->fits_included, summary->median_focus_milli_steps,
-        summary->mad_focus_milli_steps,
-        summary->median_rms_residual_milli);
+        "focus complete locked=%u fitted=%u focus=%d mad=%d residual=%d verify_exposure=%u",
+        run->result.stars_locked, run->result.stars_fitted,
+        run->result.focus_milli_steps,
+        run->result.mad_focus_milli_steps,
+        run->result.median_rms_residual_milli,
+        run->result.recommended_exposure_milliseconds);
+    return IA_OK;
+}
+
+uint32_t IA_CALL IA_FocusRunBytes(void)
+{
+    return (uint32_t)sizeof(IAFocusRun) +
+        ia_workspace_bytes(IA_FOCUS_CANDIDATES);
+}
+
+void IA_CALL IA_DefaultFocusConfig(IAFocusConfig *config)
+{
+    if (config == NULL) return;
+    memset(config, 0, sizeof(*config));
+    config->struct_size = sizeof(*config);
+    config->star_limit = IA_FOCUS_MAX_STARS;
+    config->point_count = 11u;
+    config->focus_increment = 20u;
+    config->target_minimum_peak_adu = 20000u;
+    config->target_maximum_peak_adu = 50000u;
+    config->minimum_exposure_ms = 100u;
+    config->maximum_exposure_ms = 10000u;
+    config->initial_maximum_change_milli = 4000u;
+    config->step_maximum_change_milli = 1500u;
+    config->maximum_retries = 2u;
+    config->roi_margin_pixels = 64u;
+    config->search_radius_pixels = 16u;
+    config->reject_star_flags =
+        IA_STAR_SATURATED | IA_STAR_EDGE | IA_STAR_BLENDED |
+        IA_STAR_TOO_SMALL | IA_STAR_LOW_SNR;
+    config->minimum_branch_points = 3u;
+    config->maximum_residual_milli = 1000u;
+}
+
+int IA_CALL IA_BeginFocusRun(
+    void *run_memory,
+    uint32_t run_bytes,
+    const IAFocusConfig *focus_config,
+    const IAConfig *analysis_config,
+    const uint16_t *pixels,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels,
+    int32_t center_focus_position,
+    uint32_t exposure_milliseconds,
+    IAFocusRequest *request)
+{
+    IAFocusRun *run = (IAFocusRun *)run_memory;
+    IAFrameSummary summary;
+    void *workspace;
+    uint32_t recommended;
+    int status;
+
+    if (run == NULL || run_bytes < IA_FocusRunBytes() ||
+        !ia_focus_config_valid(focus_config) ||
+        analysis_config == NULL ||
+        analysis_config->struct_size < sizeof(*analysis_config) ||
+        pixels == NULL || width == 0u || height == 0u ||
+        stride_pixels < width || exposure_milliseconds == 0u ||
+        request == NULL || request->struct_size < sizeof(*request)) {
+        return IA_INVALID_ARGUMENT;
+    }
+    memset(run, 0, sizeof(*run));
+    run->magic = IA_FOCUS_MAGIC;
+    run->config = *focus_config;
+    run->analysis_config = *analysis_config;
+    run->center_focus = center_focus_position;
+    run->first_focus =
+        center_focus_position -
+        (int32_t)(focus_config->point_count / 2u *
+                  focus_config->focus_increment);
+    workspace = (uint8_t *)run_memory + sizeof(*run);
+    summary.struct_size = sizeof(summary);
+    status = IA_AnalyzeFrame(
+        pixels, width, height, stride_pixels,
+        &run->analysis_config, workspace,
+        ia_workspace_bytes(IA_FOCUS_CANDIDATES),
+        run->candidates, IA_FOCUS_CANDIDATES, &summary);
+    if (status != IA_OK) return status;
+    status = ia_lock_compact_stars(run, summary.measured_stars);
+    if (status != IA_OK) return status;
+    status = IA_ComputeStarROI(
+        run->locked, run->star_count, width, height,
+        run->config.roi_margin_pixels, &run->roi);
+    if (status != IA_OK) return status;
+    status = ia_focus_exposure(
+        run, run->locked, NULL, exposure_milliseconds,
+        run->config.initial_maximum_change_milli, 1, &recommended);
+    if (status != IA_OK) return status;
+    run->last_exposure_ms = recommended;
+    ia_debug_log(
+        "focus begin center=%d first=%d stars=%u points=%u",
+        run->center_focus, run->first_focus,
+        run->star_count, run->config.point_count);
+    ia_focus_request(
+        run, request, IA_FOCUS_CAPTURE, IA_FOCUS_REASON_NONE,
+        run->first_focus, recommended);
+    return IA_OK;
+}
+
+int IA_CALL IA_SubmitFocusFrame(
+    void *run_memory,
+    const uint16_t *pixels,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels,
+    int32_t origin_x,
+    int32_t origin_y,
+    int32_t focus_position,
+    uint32_t exposure_milliseconds,
+    IAFocusRequest *request)
+{
+    IAFocusRun *run = (IAFocusRun *)run_memory;
+    const IAStar *previous;
+    uint32_t reason = IA_FOCUS_REASON_NONE;
+    uint32_t usable = 0u;
+    uint32_t recommended = exposure_milliseconds;
+    uint32_t i;
+    int status;
+
+    if (run == NULL || run->magic != IA_FOCUS_MAGIC ||
+        pixels == NULL || width == 0u || height == 0u ||
+        stride_pixels < width || exposure_milliseconds == 0u ||
+        request == NULL || request->struct_size < sizeof(*request)) {
+        return IA_INVALID_ARGUMENT;
+    }
+    status = ia_measure_focus_frame(
+        run, pixels, width, height, stride_pixels, origin_x, origin_y);
+    if (status != IA_OK) return status;
+    for (i = 0u; i < run->star_count; ++i) {
+        if ((run->measurements[i].flags &
+             run->config.reject_star_flags) == 0u) {
+            ++usable;
+        }
+        if ((run->measurements[i].flags & IA_STAR_SATURATED) != 0u) {
+            reason |= IA_FOCUS_REASON_SATURATED;
+        }
+        if ((run->measurements[i].flags & IA_STAR_LOW_SNR) != 0u) {
+            reason |= IA_FOCUS_REASON_TOO_FAINT;
+        }
+    }
+    previous = run->previous_valid ? run->previous : NULL;
+    if (usable == 0u) {
+        reason |= IA_FOCUS_REASON_NO_STARS;
+        if (run->retry_count < run->config.maximum_retries &&
+            ia_focus_exposure(
+                run, run->measurements, NULL, exposure_milliseconds,
+                run->config.step_maximum_change_milli, 1,
+                &recommended) == IA_OK) {
+            ++run->retry_count;
+            ia_focus_request(
+                run, request, IA_FOCUS_RETAKE, reason,
+                focus_position, recommended);
+            return IA_OK;
+        }
+        ia_focus_request(
+            run, request, IA_FOCUS_FAILED, reason,
+            focus_position, exposure_milliseconds);
+        return IA_OK;
+    }
+
+    for (i = 0u; i < run->star_count; ++i) {
+        IAFocusPoint *point =
+            &run->points[i][run->point_index];
+        point->focus_position = focus_position;
+        point->hfd_milli_pixels =
+            run->measurements[i].hfd_milli_pixels;
+        point->flags = run->measurements[i].flags;
+    }
+    run->retry_count = 0u;
+    if (run->point_index + 1u >= run->config.point_count) {
+        if (ia_focus_exposure(
+            run, run->measurements, previous, exposure_milliseconds,
+            run->config.step_maximum_change_milli, 1,
+            &recommended) != IA_OK) {
+            recommended = exposure_milliseconds;
+        }
+        if (ia_finish_focus_run(run, recommended) == IA_OK) {
+            ia_focus_request(
+                run, request, IA_FOCUS_COMPLETE, reason,
+                (run->result.focus_milli_steps + 500) / IA_MILLI,
+                run->result.recommended_exposure_milliseconds);
+        } else {
+            ia_focus_request(
+                run, request, IA_FOCUS_FAILED,
+                reason | IA_FOCUS_REASON_NO_CURVE,
+                focus_position, exposure_milliseconds);
+        }
+        return IA_OK;
+    }
+
+    {
+        int32_t next_focus =
+            run->first_focus +
+            (int32_t)((run->point_index + 1u) *
+                      run->config.focus_increment);
+        int improving =
+            abs(next_focus - run->center_focus) <
+            abs(focus_position - run->center_focus);
+        if (ia_focus_exposure(
+            run, run->measurements, previous, exposure_milliseconds,
+            run->config.step_maximum_change_milli, improving,
+            &recommended) != IA_OK) {
+            recommended = exposure_milliseconds;
+        }
+        memcpy(
+            run->previous, run->measurements,
+            run->star_count * sizeof(IAStar));
+        run->previous_valid = 1u;
+        ++run->point_index;
+        run->last_exposure_ms = recommended;
+        ia_focus_request(
+            run, request, IA_FOCUS_CAPTURE, reason,
+            next_focus, recommended);
+    }
+    return IA_OK;
+}
+
+int IA_CALL IA_EndFocusRun(
+    void *run_memory,
+    IAFocusResult *result)
+{
+    IAFocusRun *run = (IAFocusRun *)run_memory;
+    if (run == NULL || run->magic != IA_FOCUS_MAGIC ||
+        result == NULL || result->struct_size < sizeof(*result) ||
+        run->result.stars_fitted == 0u) {
+        return IA_INVALID_ARGUMENT;
+    }
+    *result = run->result;
+    return IA_OK;
+}
+
+int IA_CALL IA_DiagnoseFocusFrame(
+    void *run_memory,
+    const uint16_t *pixels,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels,
+    int32_t origin_x,
+    int32_t origin_y,
+    IAFocusDiagnostic *diagnostic)
+{
+    IAFocusRun *run = (IAFocusRun *)run_memory;
+    int32_t values[IA_FOCUS_MAX_STARS];
+    int32_t deviations[IA_FOCUS_MAX_STARS];
+    uint32_t measured = 0u;
+    uint32_t saturated = 0u;
+    uint32_t i;
+    int status;
+
+    if (run == NULL || run->magic != IA_FOCUS_MAGIC ||
+        diagnostic == NULL ||
+        diagnostic->struct_size < sizeof(*diagnostic)) {
+        return IA_INVALID_ARGUMENT;
+    }
+    status = ia_measure_focus_frame(
+        run, pixels, width, height, stride_pixels, origin_x, origin_y);
+    if (status != IA_OK) return status;
+    for (i = 0u; i < run->star_count; ++i) {
+        if ((run->measurements[i].flags & IA_STAR_SATURATED) != 0u) {
+            ++saturated;
+        }
+        if ((run->measurements[i].flags &
+             run->config.reject_star_flags) == 0u &&
+            run->measurements[i].hfd_milli_pixels > 0) {
+            values[measured++] =
+                run->measurements[i].hfd_milli_pixels;
+        }
+    }
+    memset(diagnostic, 0, sizeof(*diagnostic));
+    diagnostic->struct_size = sizeof(*diagnostic);
+    diagnostic->stars_measured = measured;
+    diagnostic->saturated_stars = saturated;
+    if (measured == 0u) return IA_NO_STARS;
+    diagnostic->median_hfd_milli_pixels =
+        ia_median_i32(values, measured);
+    for (i = 0u; i < measured; ++i) {
+        int64_t difference =
+            (int64_t)values[i] -
+            diagnostic->median_hfd_milli_pixels;
+        if (difference < 0) difference = -difference;
+        deviations[i] =
+            difference > INT32_MAX ? INT32_MAX : (int32_t)difference;
+    }
+    diagnostic->mad_hfd_milli_pixels =
+        ia_median_i32(deviations, measured);
     return IA_OK;
 }
