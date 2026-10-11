@@ -1055,6 +1055,118 @@ int IA_CALL IA_RecommendExposure(
     return IA_OK;
 }
 
+int IA_CALL IA_RecommendFocusExposure(
+    uint32_t current_milliseconds,
+    const IAStar *measurements,
+    const IAStar *previous_measurements,
+    uint32_t star_count,
+    uint32_t target_minimum_peak_adu,
+    uint32_t target_maximum_peak_adu,
+    uint32_t minimum_milliseconds,
+    uint32_t maximum_milliseconds,
+    uint32_t maximum_change_milli,
+    uint32_t *recommended_milliseconds)
+{
+    double required_minimum = 0.0;
+    double allowed_maximum = HUGE_VAL;
+    double maximum_ratio;
+    double recommended;
+    uint32_t usable = 0u;
+    uint32_t i;
+
+    ia_debug_log(
+        "IA_RecommendFocusExposure enter current=%u stars=%u target=%u-%u",
+        current_milliseconds, star_count,
+        target_minimum_peak_adu, target_maximum_peak_adu);
+    if (measurements == NULL || recommended_milliseconds == NULL ||
+        current_milliseconds == 0u || star_count == 0u ||
+        target_minimum_peak_adu >= target_maximum_peak_adu ||
+        maximum_milliseconds < minimum_milliseconds ||
+        maximum_change_milli < IA_MILLI) {
+        ia_debug_log("IA_RecommendFocusExposure invalid argument");
+        return IA_INVALID_ARGUMENT;
+    }
+
+    for (i = 0u; i < star_count; ++i) {
+        double background =
+            measurements[i].background_milli_adu / (double)IA_MILLI;
+        double current_hfd = measurements[i].hfd_milli_pixels;
+        double predicted_hfd = current_hfd;
+        double measured_signal;
+        double predicted_signal;
+        double target_minimum_signal;
+        double target_maximum_signal;
+        double star_minimum;
+        double star_maximum;
+
+        if (background < 0.0) background = 0.0;
+        if (current_hfd <= 0.0 || measurements[i].peak_adu <= background) {
+            continue;
+        }
+        if (previous_measurements != NULL &&
+            previous_measurements[i].hfd_milli_pixels > 0) {
+            predicted_hfd =
+                2.0 * current_hfd -
+                previous_measurements[i].hfd_milli_pixels;
+            if (predicted_hfd < current_hfd * 0.5) {
+                predicted_hfd = current_hfd * 0.5;
+            }
+            if (predicted_hfd > current_hfd * 2.0) {
+                predicted_hfd = current_hfd * 2.0;
+            }
+        }
+        measured_signal = measurements[i].peak_adu - background;
+        predicted_signal = measured_signal *
+            (current_hfd * current_hfd) /
+            (predicted_hfd * predicted_hfd);
+        target_minimum_signal = target_minimum_peak_adu - background;
+        target_maximum_signal = target_maximum_peak_adu - background;
+        if (predicted_signal <= 0.0 || target_minimum_signal <= 0.0 ||
+            target_maximum_signal <= target_minimum_signal) {
+            continue;
+        }
+        star_minimum =
+            current_milliseconds * target_minimum_signal / predicted_signal;
+        star_maximum =
+            current_milliseconds * target_maximum_signal / predicted_signal;
+        if (star_minimum > required_minimum) required_minimum = star_minimum;
+        if (star_maximum < allowed_maximum) allowed_maximum = star_maximum;
+        ++usable;
+        ia_debug_log(
+            "IA_RecommendFocusExposure star=%u peak=%u hfd=%d predicted_hfd=%.0f range=%.0f-%.0f",
+            i, measurements[i].peak_adu,
+            measurements[i].hfd_milli_pixels, predicted_hfd,
+            star_minimum, star_maximum);
+    }
+    if (usable == 0u) {
+        ia_debug_log("IA_RecommendFocusExposure no usable stars");
+        return IA_NO_STARS;
+    }
+
+    if (required_minimum <= allowed_maximum) {
+        recommended = current_milliseconds;
+        if (recommended < required_minimum) recommended = required_minimum;
+        if (recommended > allowed_maximum) recommended = allowed_maximum;
+    } else {
+        recommended = allowed_maximum;
+    }
+    maximum_ratio = (double)maximum_change_milli / IA_MILLI;
+    if (recommended > current_milliseconds * maximum_ratio) {
+        recommended = current_milliseconds * maximum_ratio;
+    }
+    if (recommended < current_milliseconds / maximum_ratio) {
+        recommended = current_milliseconds / maximum_ratio;
+    }
+    if (recommended < minimum_milliseconds) recommended = minimum_milliseconds;
+    if (recommended > maximum_milliseconds) recommended = maximum_milliseconds;
+    *recommended_milliseconds = ia_clamp_u32(recommended);
+    ia_debug_log(
+        "IA_RecommendFocusExposure exit usable=%u common=%d range=%.0f-%.0f recommended=%u",
+        usable, required_minimum <= allowed_maximum,
+        required_minimum, allowed_maximum, *recommended_milliseconds);
+    return IA_OK;
+}
+
 int IA_CALL IA_ComputeStarROI(
     const IAStar *stars,
     uint32_t star_count,

@@ -211,6 +211,18 @@ IA_EXPORT int IA_CALL IA_RecommendExposure(
     uint32_t maximum_change_milli,
     uint32_t *recommended_milliseconds);
 
+IA_EXPORT int IA_CALL IA_RecommendFocusExposure(
+    uint32_t current_milliseconds,
+    const IAStar *measurements,
+    const IAStar *previous_measurements,
+    uint32_t star_count,
+    uint32_t target_minimum_peak_adu,
+    uint32_t target_maximum_peak_adu,
+    uint32_t minimum_milliseconds,
+    uint32_t maximum_milliseconds,
+    uint32_t maximum_change_milli,
+    uint32_t *recommended_milliseconds);
+
 IA_EXPORT int IA_CALL IA_ComputeStarROI(
     const IAStar *stars,
     uint32_t star_count,

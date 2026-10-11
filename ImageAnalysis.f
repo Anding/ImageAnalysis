@@ -29,6 +29,13 @@ Extern: int "C" IA_RecommendExposure(
     int target_peak_adu, int minimum_milliseconds, int maximum_milliseconds,
     int maximum_change_milli, int * recommended_milliseconds
 ) ;
+Extern: int "C" IA_RecommendFocusExposure(
+    int current_milliseconds, int * measurements,
+    int * previous_measurements, int star_count,
+    int target_minimum_peak_adu, int target_maximum_peak_adu,
+    int minimum_milliseconds, int maximum_milliseconds,
+    int maximum_change_milli, int * recommended_milliseconds
+) ;
 Extern: int "C" IA_ComputeStarROI(
     int * stars, int star_count, int image_width, int image_height,
     int margin_pixels, int * roi
@@ -218,6 +225,17 @@ variable ia.recommended-exposure
     current-ms peak background target min-ms max-ms max-change-milli
     ia.recommended-exposure
     IA_RecommendExposure
+    ia.recommended-exposure @ swap
+;
+
+: ia.recommend-focus-exposure
+    { current-ms measurements previous-measurements count
+      target-min target-max min-ms max-ms max-change-milli
+      -- recommended-ms status }
+    current-ms measurements previous-measurements count
+    target-min target-max min-ms max-ms max-change-milli
+    ia.recommended-exposure
+    IA_RecommendFocusExposure
     ia.recommended-exposure @ swap
 ;
 

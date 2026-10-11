@@ -164,6 +164,36 @@ static void test_calculations(void)
     CHECK(exposure == 2000u, "linear exposure recommendation");
 
     memset(stars, 0, sizeof(stars));
+    stars[0].peak_adu = 31000u;
+    stars[0].background_milli_adu = 1000000;
+    stars[0].hfd_milli_pixels = 6000;
+    stars[1].peak_adu = 26000u;
+    stars[1].background_milli_adu = 1000000;
+    stars[1].hfd_milli_pixels = 7000;
+    {
+        IAStar previous[2] = { stars[0], stars[1] };
+        previous[0].hfd_milli_pixels = 8000;
+        previous[1].hfd_milli_pixels = 9000;
+        status = IA_RecommendFocusExposure(
+            4000u, stars, previous, 2u, 20000u, 50000u,
+            100u, 10000u, 2000u, &exposure);
+    }
+    CHECK(status == IA_OK && exposure < 4000u,
+        "ensemble shortens exposure while focus improves");
+    {
+        IAStar previous[2] = { stars[0], stars[1] };
+        stars[0].hfd_milli_pixels = 8000;
+        stars[1].hfd_milli_pixels = 9000;
+        previous[0].hfd_milli_pixels = 6000;
+        previous[1].hfd_milli_pixels = 7000;
+        status = IA_RecommendFocusExposure(
+            4000u, stars, previous, 2u, 20000u, 50000u,
+            100u, 10000u, 2000u, &exposure);
+    }
+    CHECK(status == IA_OK && exposure > 4000u,
+        "ensemble lengthens exposure while focus worsens");
+
+    memset(stars, 0, sizeof(stars));
     stars[0].x_milli = 20000;
     stars[0].y_milli = 30000;
     stars[1].x_milli = 80000;
