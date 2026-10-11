@@ -34,7 +34,8 @@ Extern: int "C" IA_RecommendFocusExposure(
     int * previous_measurements, int star_count,
     int target_minimum_peak_adu, int target_maximum_peak_adu,
     int minimum_milliseconds, int maximum_milliseconds,
-    int maximum_change_milli, int * recommended_milliseconds
+    int maximum_change_milli, int * better_focus_milliseconds,
+    int * worse_focus_milliseconds
 ) ;
 Extern: int "C" IA_ComputeStarROI(
     int * stars, int star_count, int image_width, int image_height,
@@ -218,6 +219,8 @@ ia.config IA_DefaultConfig
 ;
 
 variable ia.recommended-exposure
+variable ia.better-focus-exposure
+variable ia.worse-focus-exposure
 
 : ia.recommend-exposure
     { current-ms peak background target min-ms max-ms max-change-milli
@@ -231,12 +234,12 @@ variable ia.recommended-exposure
 : ia.recommend-focus-exposure
     { current-ms measurements previous-measurements count
       target-min target-max min-ms max-ms max-change-milli
-      -- recommended-ms status }
+      -- better-ms worse-ms status }
     current-ms measurements previous-measurements count
     target-min target-max min-ms max-ms max-change-milli
-    ia.recommended-exposure
+    ia.better-focus-exposure ia.worse-focus-exposure
     IA_RecommendFocusExposure
-    ia.recommended-exposure @ swap
+    ia.better-focus-exposure @ ia.worse-focus-exposure @ rot
 ;
 
 create ia.roi <IA_RECT> allot

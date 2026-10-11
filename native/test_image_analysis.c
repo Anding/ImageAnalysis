@@ -154,6 +154,7 @@ static void test_detection_and_measurement(void)
 static void test_calculations(void)
 {
     uint32_t exposure = 0u;
+    uint32_t worse_exposure = 0u;
     IAStar stars[2];
     IARect roi;
     int status;
@@ -176,22 +177,12 @@ static void test_calculations(void)
         previous[1].hfd_milli_pixels = 9000;
         status = IA_RecommendFocusExposure(
             4000u, stars, previous, 2u, 20000u, 50000u,
-            100u, 10000u, 2000u, &exposure);
+            100u, 10000u, 2000u, &exposure, &worse_exposure);
     }
     CHECK(status == IA_OK && exposure < 4000u,
-        "ensemble shortens exposure while focus improves");
-    {
-        IAStar previous[2] = { stars[0], stars[1] };
-        stars[0].hfd_milli_pixels = 8000;
-        stars[1].hfd_milli_pixels = 9000;
-        previous[0].hfd_milli_pixels = 6000;
-        previous[1].hfd_milli_pixels = 7000;
-        status = IA_RecommendFocusExposure(
-            4000u, stars, previous, 2u, 20000u, 50000u,
-            100u, 10000u, 2000u, &exposure);
-    }
-    CHECK(status == IA_OK && exposure > 4000u,
-        "ensemble lengthens exposure while focus worsens");
+        "ensemble recommends shorter exposure for better focus");
+    CHECK(status == IA_OK && worse_exposure > 4000u,
+        "ensemble recommends longer exposure for worse focus");
 
     memset(stars, 0, sizeof(stars));
     stars[0].x_milli = 20000;

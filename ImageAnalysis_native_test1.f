@@ -59,7 +59,7 @@ create native.test.focus-stars <IA_STAR> 2 * allot
 create native.test.previous-focus-stars <IA_STAR> 2 * allot
 
 : native.test.focus-exposure
-    { current-hfd previous-hfd -- recommended-ms status }
+    { current-hfd previous-hfd -- better-ms worse-ms status }
     native.test.focus-stars <IA_STAR> 2 * erase
     native.test.previous-focus-stars <IA_STAR> 2 * erase
     31000 native.test.focus-stars IA_STAR.peak_adu !
@@ -94,8 +94,8 @@ T{ 0 ia.star IA_STAR.y_milli @ 30000 32000 within }T -1 ==
 T{ s" NSTARS" native.test.frame FRAME_METADATA @ >string hashS }T s" 1" hashS ==
 T{ s" HFD" native.test.frame FRAME_METADATA @ >string nip 0> }T -1 ==
 T{ 1000 21000 1000 41000 100 10000 4000 ia.recommend-exposure }T 2000 0 ==
-T{ 6000 8000 native.test.focus-exposure drop 4000 < }T -1 ==
-T{ 8000 6000 native.test.focus-exposure drop 4000 > }T -1 ==
+T{ 6000 8000 native.test.focus-exposure drop
+    swap 4000 < swap 4000 > and }T -1 ==
 T{ 0 ia.star 1 64 64 5 ia.compute-roi
     swap IA_RECT.width @ swap }T 11 0 ==
 T{ native.test.frame 0 ia.star 1 5 native.test.measurement

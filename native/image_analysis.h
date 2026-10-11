@@ -221,7 +221,8 @@ IA_EXPORT int IA_CALL IA_RecommendFocusExposure(
     uint32_t minimum_milliseconds,
     uint32_t maximum_milliseconds,
     uint32_t maximum_change_milli,
-    uint32_t *recommended_milliseconds);
+    uint32_t *better_focus_milliseconds,
+    uint32_t *worse_focus_milliseconds);
 
 IA_EXPORT int IA_CALL IA_ComputeStarROI(
     const IAStar *stars,
