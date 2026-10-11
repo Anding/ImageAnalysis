@@ -58,6 +58,7 @@ create native.test.measurement <IA_STAR> allot
 
 Tstart
 T{ IA_Version }T 1 ==
+T{ ia.debug-on ia.debug-off IA_Version }T 1 ==
 T{ ia.summary IA_FRAME_SUMMARY.detected_stars @ 0> }T -1 ==
 T{ ia.summary IA_FRAME_SUMMARY.included_stars @ }T 1 ==
 T{ 0 ia.star IA_STAR.x_milli @ 31000 33000 within }T -1 ==

@@ -32,6 +32,9 @@ extern "C" {
 
 #define IA_API_VERSION 1u
 #define IA_MILLI 1000
+#ifndef IA_DEBUG_LOG_PATH
+#define IA_DEBUG_LOG_PATH "E:\\images\\logs\\image-analysis-native.log"
+#endif
 
 enum IAStatus {
     IA_OK = 0,
@@ -163,6 +166,7 @@ typedef struct IAFocusSummary {
 } IAFocusSummary;
 
 IA_EXPORT uint32_t IA_CALL IA_Version(void);
+IA_EXPORT void IA_CALL IA_SetDebug(uint32_t enabled);
 IA_EXPORT void IA_CALL IA_DefaultConfig(IAConfig *config);
 IA_EXPORT uint32_t IA_CALL IA_WorkspaceBytes(uint32_t maximum_stars);
 

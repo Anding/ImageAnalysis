@@ -30,6 +30,36 @@ static int failures;
         } \
     } while (0)
 
+static long debug_log_size(void)
+{
+    FILE *file = fopen(IA_DEBUG_LOG_PATH, "rb");
+    long size;
+    if (file == NULL) {
+        return -1;
+    }
+    fseek(file, 0, SEEK_END);
+    size = ftell(file);
+    fclose(file);
+    return size;
+}
+
+static void test_debug_logging(void)
+{
+    long before;
+    long after;
+
+    IA_SetDebug(0u);
+    before = debug_log_size();
+    IA_Version();
+    CHECK(debug_log_size() == before, "native debug disabled by default");
+
+    IA_SetDebug(1u);
+    IA_Version();
+    IA_SetDebug(0u);
+    after = debug_log_size();
+    CHECK(after > before, "native debug appends and flushes");
+}
+
 static void add_gaussian(
     uint16_t *image,
     double center_x,
@@ -235,6 +265,7 @@ static void test_focus_fitting(void)
 int main(void)
 {
     CHECK(IA_Version() == IA_API_VERSION, "API version");
+    test_debug_logging();
     test_detection_and_measurement();
     test_calculations();
     test_focus_fitting();

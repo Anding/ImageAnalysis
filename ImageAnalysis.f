@@ -7,6 +7,7 @@ need ForthAstroFormats
 
 LIBRARY: ImageAnalysisNative.dll
 Extern: int "C" IA_Version() ;
+Extern: void "C" IA_SetDebug( int enabled ) ;
 Extern: void "C" IA_DefaultConfig( int * config ) ;
 Extern: int "C" IA_WorkspaceBytes( int maximum_stars ) ;
 Extern: int "C" IA_AnalyzeFrame(
@@ -173,6 +174,9 @@ value ia.reject-flags
 32 value ia.summary-stars
 
 ia.config IA_DefaultConfig
+
+: ia.debug-on  ( -- ) -1 IA_SetDebug ;
+: ia.debug-off ( -- )  0 IA_SetDebug ;
 
 : ia.star ( index -- star )
     <IA_STAR> * ia.stars +

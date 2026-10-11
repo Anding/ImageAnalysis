@@ -16,9 +16,12 @@
 #include "image_analysis.h"
 
 #include <math.h>
+#include <stdarg.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define IA_HISTOGRAM_BINS 65536u
 #define IA_CANDIDATES_PER_STAR 8u
@@ -38,6 +41,45 @@ typedef struct IAWorkspaceView {
     IACandidate *selected;
     uint32_t candidate_capacity;
 } IAWorkspaceView;
+
+static int ia_debug_enabled;
+
+static void ia_debug_log(const char *format, ...)
+{
+    FILE *file;
+    time_t now;
+    struct tm local;
+    char timestamp[24];
+    va_list arguments;
+
+    if (!ia_debug_enabled) {
+        return;
+    }
+#ifdef _WIN32
+    if (fopen_s(&file, IA_DEBUG_LOG_PATH, "a") != 0) {
+        return;
+    }
+#else
+    file = fopen(IA_DEBUG_LOG_PATH, "a");
+    if (file == NULL) {
+        return;
+    }
+#endif
+    now = time(NULL);
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &local);
+    fprintf(file, "%s ", timestamp);
+    va_start(arguments, format);
+    vfprintf(file, format, arguments);
+    va_end(arguments);
+    fputc('\n', file);
+    fflush(file);
+    fclose(file);
+}
 
 static uint32_t ia_clamp_u32(double value)
 {
@@ -709,7 +751,19 @@ static int32_t ia_mad_i32(int32_t *values, uint32_t count, int32_t median)
 
 uint32_t IA_CALL IA_Version(void)
 {
+    ia_debug_log("IA_Version version=%u", IA_API_VERSION);
     return IA_API_VERSION;
+}
+
+void IA_CALL IA_SetDebug(uint32_t enabled)
+{
+    if (enabled != 0u) {
+        ia_debug_enabled = 1;
+        ia_debug_log("debug enabled");
+    } else {
+        ia_debug_log("debug disabled");
+        ia_debug_enabled = 0;
+    }
 }
 
 void IA_CALL IA_DefaultConfig(IAConfig *config)
@@ -832,17 +886,22 @@ int IA_CALL IA_AnalyzeFrame(
     uint32_t i;
     int status;
 
+    ia_debug_log(
+        "IA_AnalyzeFrame enter width=%u height=%u stride=%u capacity=%u workspace=%u",
+        width, height, stride_pixels, star_capacity, workspace_bytes);
     if (pixels == NULL || config == NULL || stars == NULL || summary == NULL ||
         width == 0u || height == 0u || stride_pixels < width || star_capacity == 0u ||
         config->struct_size < sizeof(*config) || summary->struct_size < sizeof(*summary) ||
         config->aperture_radius_pixels == 0u ||
         config->annulus_inner_radius_pixels <= config->aperture_radius_pixels ||
         config->annulus_outer_radius_pixels <= config->annulus_inner_radius_pixels) {
+        ia_debug_log("IA_AnalyzeFrame invalid argument");
         return IA_INVALID_ARGUMENT;
     }
 
     status = ia_workspace_view(workspace, workspace_bytes, star_capacity, &view);
     if (status != IA_OK) {
+        ia_debug_log("IA_AnalyzeFrame workspace status=%d", status);
         return status;
     }
 
@@ -884,6 +943,10 @@ int IA_CALL IA_AnalyzeFrame(
     summary->background_milli_adu = ia_clamp_i32((double)median * IA_MILLI);
     summary->noise_milli_adu = ia_clamp_i32(noise * IA_MILLI);
     summary->detection_threshold_adu = threshold;
+    ia_debug_log(
+        "IA_AnalyzeFrame exit status=%d detected=%u measured=%u included=%u threshold=%u",
+        selected_count == 0u ? IA_NO_STARS : status,
+        candidate_count, selected_count, summary->included_stars, threshold);
     return selected_count == 0u ? IA_NO_STARS : status;
 }
 
@@ -900,9 +963,13 @@ int IA_CALL IA_MeasureLockedStars(
 {
     uint32_t i;
 
+    ia_debug_log(
+        "IA_MeasureLockedStars enter width=%u height=%u stride=%u stars=%u radius=%u",
+        width, height, stride_pixels, star_count, search_radius_pixels);
     if (pixels == NULL || config == NULL || locked_stars == NULL ||
         measurements == NULL || width == 0u || height == 0u ||
         stride_pixels < width || config->struct_size < sizeof(*config)) {
+        ia_debug_log("IA_MeasureLockedStars invalid argument");
         return IA_INVALID_ARGUMENT;
     }
 
@@ -921,6 +988,9 @@ int IA_CALL IA_MeasureLockedStars(
         if (top < 0) top = 0;
         if (right >= (int32_t)width) right = (int32_t)width - 1;
         if (bottom >= (int32_t)height) bottom = (int32_t)height - 1;
+        ia_debug_log(
+            "IA_MeasureLockedStars star=%u expected=(%d,%d) window=(%d,%d)-(%d,%d)",
+            i, expected_x, expected_y, left, top, right, bottom);
         candidate.x = (uint32_t)(expected_x < 0 ? 0 : expected_x);
         candidate.y = (uint32_t)(expected_y < 0 ? 0 : expected_y);
         candidate.peak = 0u;
@@ -938,7 +1008,14 @@ int IA_CALL IA_MeasureLockedStars(
         ia_measure_candidate(
             pixels, width, height, stride_pixels, config, &candidate,
             &candidate, 1u, &measurements[i]);
+        ia_debug_log(
+            "IA_MeasureLockedStars star=%u measured=(%d,%d) peak=%u hfd=%d flags=%u",
+            i, measurements[i].x_milli, measurements[i].y_milli,
+            measurements[i].peak_adu, measurements[i].hfd_milli_pixels,
+            measurements[i].flags);
     }
+    ia_debug_log("IA_MeasureLockedStars exit status=%d",
+        star_count == 0u ? IA_NO_STARS : IA_OK);
     return star_count == 0u ? IA_NO_STARS : IA_OK;
 }
 
@@ -992,8 +1069,12 @@ int IA_CALL IA_ComputeStarROI(
     int64_t bottom;
     uint32_t i;
 
+    ia_debug_log(
+        "IA_ComputeStarROI enter stars=%u image=%ux%u margin=%u",
+        star_count, image_width, image_height, margin_pixels);
     if (stars == NULL || star_count == 0u || image_width == 0u || image_height == 0u ||
         roi == NULL) {
+        ia_debug_log("IA_ComputeStarROI invalid argument");
         return IA_INVALID_ARGUMENT;
     }
 
@@ -1023,6 +1104,8 @@ int IA_CALL IA_ComputeStarROI(
     roi->y = (int32_t)top;
     roi->width = (int32_t)(right - left + 1);
     roi->height = (int32_t)(bottom - top + 1);
+    ia_debug_log("IA_ComputeStarROI exit roi=(%d,%d) %dx%d",
+        roi->x, roi->y, roi->width, roi->height);
     return IA_OK;
 }
 
@@ -1080,18 +1163,28 @@ int IA_CALL IA_FitFocusModel(
     uint32_t used = 0u;
     uint32_t i;
 
+    ia_debug_log(
+        "IA_FitFocusModel enter kind=%u samples=%u reject=%u resolution=%u",
+        model == NULL ? 0u : model->kind, sample_count,
+        reject_sample_flags, resolution_milli_steps);
     if (samples == NULL || fit == NULL || fit->struct_size < sizeof(*fit) ||
         sample_count == 0u || resolution_milli_steps == 0u) {
+        ia_debug_log("IA_FitFocusModel invalid argument");
         return IA_INVALID_ARGUMENT;
     }
     memset(fit, 0, sizeof(*fit));
     fit->struct_size = sizeof(*fit);
     if (!ia_valid_focus_model(model)) {
         fit->flags = IA_FOCUS_INVALID_MODEL;
+        ia_debug_log("IA_FitFocusModel invalid model");
         return IA_INVALID_ARGUMENT;
     }
 
     for (i = 0u; i < sample_count; ++i) {
+        ia_debug_log(
+            "IA_FitFocusModel sample=%u focus=%d metric=%d weight=%u flags=%u",
+            i, samples[i].focus_position, samples[i].metric_milli,
+            samples[i].weight_milli, samples[i].flags);
         if ((samples[i].flags & reject_sample_flags) == 0u &&
             samples[i].weight_milli > 0u) {
             if (samples[i].focus_position < minimum_position) {
@@ -1106,6 +1199,7 @@ int IA_CALL IA_FitFocusModel(
     fit->points_used = used;
     if (used < 3u || minimum_position >= maximum_position) {
         fit->flags = IA_FOCUS_INSUFFICIENT_POINTS;
+        ia_debug_log("IA_FitFocusModel insufficient points used=%u", used);
         return IA_NO_STARS;
     }
 
@@ -1167,6 +1261,11 @@ int IA_CALL IA_FitFocusModel(
         best_center + resolution_milli_steps > last_center) {
         fit->flags |= IA_FOCUS_AT_BOUNDARY;
     }
+    ia_debug_log(
+        "IA_FitFocusModel exit focus=%d offset=%d residual=%d used=%u left=%u right=%u flags=%u",
+        fit->focus_milli_steps, fit->vertical_offset_milli,
+        fit->rms_residual_milli, fit->points_used,
+        fit->points_left, fit->points_right, fit->flags);
     return IA_OK;
 }
 
@@ -1182,11 +1281,16 @@ int IA_CALL IA_CombineFocusFits(
     uint32_t included = 0u;
     uint32_t i;
 
+    ia_debug_log("IA_CombineFocusFits enter fits=%u reject=%u",
+        fit_count, reject_fit_flags);
     if (fits == NULL || summary == NULL || summary->struct_size < sizeof(*summary)) {
+        ia_debug_log("IA_CombineFocusFits invalid argument");
         return IA_INVALID_ARGUMENT;
     }
     if (fit_count > 0u &&
         (workspace == NULL || workspace_bytes < fit_count * sizeof(int32_t))) {
+        ia_debug_log("IA_CombineFocusFits workspace too small bytes=%u",
+            workspace_bytes);
         return IA_WORKSPACE_TOO_SMALL;
     }
 
@@ -1194,12 +1298,17 @@ int IA_CALL IA_CombineFocusFits(
     summary->struct_size = sizeof(*summary);
     values = (int32_t *)workspace;
     for (i = 0u; i < fit_count; ++i) {
+        ia_debug_log(
+            "IA_CombineFocusFits fit=%u focus=%d residual=%d points=%u flags=%u",
+            i, fits[i].focus_milli_steps, fits[i].rms_residual_milli,
+            fits[i].points_used, fits[i].flags);
         if ((fits[i].flags & reject_fit_flags) == 0u) {
             values[included++] = fits[i].focus_milli_steps;
         }
     }
     summary->fits_included = included;
     if (included == 0u) {
+        ia_debug_log("IA_CombineFocusFits no included fits");
         return IA_NO_STARS;
     }
     summary->median_focus_milli_steps = ia_median_i32(values, included);
@@ -1216,5 +1325,10 @@ int IA_CALL IA_CombineFocusFits(
         }
     }
     summary->median_rms_residual_milli = ia_median_i32(values, included);
+    ia_debug_log(
+        "IA_CombineFocusFits exit included=%u focus=%d mad=%d residual=%d",
+        summary->fits_included, summary->median_focus_milli_steps,
+        summary->mad_focus_milli_steps,
+        summary->median_rms_residual_milli);
     return IA_OK;
 }

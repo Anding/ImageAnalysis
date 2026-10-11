@@ -41,3 +41,8 @@ median per-star model residuals of 0.36-0.58 pixels and focus estimates from
 5234 to 5253. The cloudy bracket produced residuals above 2.3 pixels, giving
 Forth policy a strong numerical rejection signal without embedding that
 decision in C.
+
+Native diagnostics are independent of Forth logging and are off by default.
+`IA_SetDebug(1)` (or `ia.debug-on`) appends immediately flushed calculation
+checkpoints to `E:\images\logs\image-analysis-native.log`;
+`IA_SetDebug(0)` (or `ia.debug-off`) disables them.
