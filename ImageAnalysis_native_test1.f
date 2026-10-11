@@ -54,6 +54,7 @@ create native.test.samples <IA_FOCUS_SAMPLE> 3 * allot
 5020 2000 1 native.test.sample
 5060 3680 2 native.test.sample
 create native.test.fit <IA_FOCUS_FIT> allot
+create native.test.measurement <IA_STAR> allot
 
 Tstart
 T{ IA_Version }T 1 ==
@@ -66,6 +67,9 @@ T{ s" HFD" native.test.frame FRAME_METADATA @ >string nip 0> }T -1 ==
 T{ 1000 21000 1000 41000 100 10000 4000 ia.recommend-exposure }T 2000 0 ==
 T{ 0 ia.star 1 64 64 5 ia.compute-roi
     swap IA_RECT.width @ swap }T 11 0 ==
+T{ native.test.frame 0 ia.star 1 5 native.test.measurement
+    ia.measure-locked }T 0 ==
+T{ native.test.measurement IA_STAR.hfd_milli_pixels @ 0> }T -1 ==
 T{ native.test.model native.test.samples 3 0 250 native.test.fit
     ia.fit-focus }T 0 ==
 T{ native.test.fit IA_FOCUS_FIT.focus_milli_steps @
