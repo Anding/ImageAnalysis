@@ -27,6 +27,7 @@
 #define IA_CANDIDATES_PER_STAR 8u
 #define IA_RADIAL_BINS 1024u
 #define IA_RADIAL_SCALE 16.0
+#define IA_FOCUS_MIN_BRANCH_RISE_RMS 2.0
 
 typedef struct IACandidate {
     uint32_t x;
@@ -1458,6 +1459,9 @@ static int ia_fit_v(
         IALine right;
         double focus;
         double squared_error = 0.0;
+        double rms;
+        double left_rise;
+        double right_rise;
         if (ia_regression(valid, 0u, split, &left) != IA_OK ||
             ia_regression(valid, split, count - split, &right) != IA_OK ||
             left.slope >= 0.0 || right.slope <= 0.0 ||
@@ -1480,6 +1484,17 @@ static int ia_fit_v(
             squared_error += residual * residual;
         }
         squared_error /= count;
+        rms = sqrt(squared_error);
+        left_rise =
+            -left.slope *
+            (focus - valid[0].focus_position);
+        right_rise =
+            right.slope *
+            (valid[count - 1u].focus_position - focus);
+        if (left_rise < IA_FOCUS_MIN_BRANCH_RISE_RMS * rms ||
+            right_rise < IA_FOCUS_MIN_BRANCH_RISE_RMS * rms) {
+            continue;
+        }
         if (squared_error < best_error) {
             best_error = squared_error;
             best_focus = focus;
@@ -1505,12 +1520,22 @@ static int ia_finish_focus_run(
 
     for (i = 0u; i < run->star_count; ++i) {
         IAVFit fit;
-        if (ia_fit_v(run, i, &fit) == IA_OK &&
+        int status = ia_fit_v(run, i, &fit);
+        if (status == IA_OK &&
             fit.rms_residual_milli <=
-                (int32_t)run->config.maximum_residual_milli) {
+            (int32_t)run->config.maximum_residual_milli) {
             focus_values[fitted] = fit.focus_milli_steps;
             residual_values[fitted] = fit.rms_residual_milli;
+            ia_debug_log(
+                "focus fit star=%u focus=%d residual=%d accepted",
+                i, fit.focus_milli_steps, fit.rms_residual_milli);
             ++fitted;
+        } else if (status == IA_OK) {
+            ia_debug_log(
+                "focus fit star=%u focus=%d residual=%d rejected",
+                i, fit.focus_milli_steps, fit.rms_residual_milli);
+        } else {
+            ia_debug_log("focus fit star=%u unavailable", i);
         }
     }
     memset(&run->result, 0, sizeof(run->result));
