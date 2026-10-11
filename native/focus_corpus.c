@@ -1,3 +1,17 @@
+/*
+ * Offline focus-corpus calibration tool.
+ *
+ * This program reads saved XISF focus brackets rather than controlling
+ * equipment.  It detects stars in the reference frame, locks the best few,
+ * measures them through the bracket, and searches plausible parameter grids
+ * for the piecewise-V and hyperbolic models.  The lowest residual parameters
+ * become initial rig calibration values for the Forth environment.
+ *
+ * Keeping calibration offline is useful pedagogically and operationally:
+ * captured data is repeatable, model changes can be compared on identical
+ * stars, and no experimental fit can move the telescope focuser.
+ */
+
 #define _CRT_SECURE_NO_WARNINGS
 
 #include "image_analysis.h"

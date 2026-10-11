@@ -1,3 +1,14 @@
+/*
+ * Executable tutorial and regression suite for the native API.
+ *
+ * Each test constructs a small synthetic image or focus series with a known
+ * answer, invokes the same exported functions used by Forth, and checks
+ * physically meaningful results rather than implementation details.  Start
+ * with test_detection_and_measurement: it demonstrates workspace allocation,
+ * default configuration, frame analysis, star locking, and remeasurement.
+ * Later tests isolate ROI, exposure, and focus-model edge cases.
+ */
+
 #include "image_analysis.h"
 
 #include <math.h>

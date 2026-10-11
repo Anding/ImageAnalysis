@@ -1,3 +1,18 @@
+/*
+ * Native image analysis, from pixels to focus position.
+ *
+ * The public workflow is deliberately staged:
+ *   1. IA_AnalyzeFrame estimates the global background and finds stars.
+ *   2. IA_ComputeStarROI chooses a sensor rectangle around selected stars.
+ *   3. IA_MeasureLockedStars follows those same stars through a focus sweep.
+ *   4. IA_FitFocusModel combines their weighted samples into one focus result.
+ *
+ * Callers own both image memory and workspace memory.  This keeps allocation
+ * and hardware policy in Forth while this file remains a deterministic
+ * numerical engine.  Integer milli-units make the DLL ABI reproducible across
+ * compilers; floating point is used only inside calculations.
+ */
+
 #include "image_analysis.h"
 
 #include <math.h>

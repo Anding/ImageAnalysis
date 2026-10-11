@@ -1,3 +1,7 @@
+\ Native-binding regression using a deterministic synthetic star field.
+\ Maintenance: exercise the public Forth wrappers here; numerical edge cases
+\ that do not cross the ABI belong in native\test_image_analysis.c.
+
 need ImageAnalysis
 need simple-tester
 

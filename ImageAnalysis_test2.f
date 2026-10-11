@@ -1,3 +1,7 @@
+\ Statistical smoke test over synthetic frames.
+\ Maintenance: keep frame construction local and deterministic except where
+\ the test explicitly exercises a random distribution.
+
 need ImageAnalysis
 need simple-tester
 

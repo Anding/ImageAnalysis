@@ -1,4 +1,8 @@
-\ astronomical image analysis in Forth
+\ Direct Forth binding to the native astronomical image-analysis library.
+\
+\ Maintenance: structure layouts below are the ABI.  Keep field order, cell
+\ width, status values, and struct_size initialization synchronized with
+\ native\image_analysis.h; policy and hardware sequencing belong to callers.
 need ForthAstroFormats
 
 LIBRARY: ImageAnalysisNative.dll

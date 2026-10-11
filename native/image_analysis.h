@@ -1,3 +1,18 @@
+/*
+ * Public C ABI for native astronomical image analysis.
+ *
+ * Tutorial for callers:
+ *   - Initialize every structure's struct_size field.
+ *   - Obtain scratch size with IA_WorkspaceBytes and retain that buffer.
+ *   - Analyze a full frame, lock a small set of good stars, then measure the
+ *     same stars in each focus frame.
+ *   - Store physical quantities in the named milli- or micro-unit fields;
+ *     these scaled integers are part of the ABI, not display formatting.
+ *
+ * Structures are append-only ABI records.  Reordering fields would also
+ * invalidate the direct Forth structure declarations in ImageAnalysis.f.
+ */
+
 #ifndef IMAGE_ANALYSIS_H
 #define IMAGE_ANALYSIS_H
 

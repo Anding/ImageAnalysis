@@ -1,4 +1,7 @@
 \ Full-frame display-function integration with explicit XISF output.
+\
+\ Maintenance: retain both source and destination frames so this test covers
+\ metadata propagation as well as the pixel transform.
 
 NEED ImageAnalysis
 NEED ForthImageLoaders
