@@ -19,6 +19,10 @@
 ```   
 note that the formula is well-behaved and continuous and gives the same results as the special cases
 
+The integer and assembly implementations handle these endpoints explicitly.
+In particular, a zero-median, zero-MAD frame can select `m = 0`; its black
+pixels must return zero before evaluating the fraction, which would be `0/0`.
+
 ### Display algorithm
 For each pixel value `x` and using image parameters `m, s, and h`
 

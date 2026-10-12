@@ -116,6 +116,12 @@ END-CODE
 ;
 
 LBL: <<MID>> ( ebx = x, edi = m, return in ebx)
+    test    ebx, ebx
+    jz      L$3
+    cmp     ebx, edi
+    je      L$2
+    cmp     ebx, 0x10000
+    je      L$3
     \ compute the denominator
     mov     ecx, edi            \ ecx = m
     shl     ecx, 1              \ ecx = 2*m
@@ -134,6 +140,10 @@ LBL: <<MID>> ( ebx = x, edi = m, return in ebx)
     \ perform the division
     idiv    ecx                 \ eax = (m-1)*x / (2m-1)*x - m
     mov     ebx, eax            \ ebx = result          
+    ret
+L$2:
+    mov     ebx, 0x8000
+L$3:
     ret
 END-CODE
 
@@ -188,7 +198,7 @@ END-CODE
         ist MEDIAN @ ist df.s @ I- ist df.t !
         ist df.B @ ist df.t @ MID
      else
-        ist df.h MEDIAN @ I- ist df.t !
+        ist df.h @ ist MEDIAN @ I- ist df.t !
         ist df.t @ ist df.B @ MID
      then ist df.m !  
 ;
