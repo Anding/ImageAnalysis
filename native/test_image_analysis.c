@@ -255,6 +255,45 @@ static void test_focus_rejected_centroid(void)
     free(run);
 }
 
+static void test_locked_duplicate_identity(void)
+{
+    uint16_t image[WIDTH * HEIGHT];
+    IAConfig config;
+    IAStar locked[2];
+    IAStar measured[2];
+    IAFrameSummary summary;
+    uint32_t workspace_bytes = IA_WorkspaceBytes(2u);
+    void *workspace = malloc(workspace_bytes);
+    uint32_t i;
+    int status;
+
+    CHECK(workspace != NULL, "allocate duplicate-identity summary workspace");
+    if (workspace == NULL) return;
+    /* Maintenance: overlapping searches must not count one measured peak
+       as two independent stars and thereby duplicate its V-curve vote. */
+    for (i = 0u; i < WIDTH * HEIGHT; ++i) image[i] = 1000u;
+    add_gaussian(image, 80.0, 60.0, 2.0, 2.0, 30000.0);
+    IA_DefaultConfig(&config);
+    memset(locked, 0, sizeof(locked));
+    locked[0].x_milli = 80000;
+    locked[0].y_milli = 60000;
+    locked[1].x_milli = 90000;
+    locked[1].y_milli = 60000;
+    status = IA_MeasureLockedStars(
+        image, WIDTH, HEIGHT, WIDTH, &config, locked, 2u, 16u, measured);
+    CHECK(status == IA_OK, "measure overlapping locked searches");
+    CHECK((measured[0].flags & IA_STAR_BLENDED) == 0u,
+        "retain first identity at shared peak");
+    CHECK((measured[1].flags & IA_STAR_BLENDED) != 0u,
+        "reject secondary identity at duplicate centroid");
+    summary.struct_size = sizeof(summary);
+    status = IA_SummarizeStars(
+        measured, 2u, IA_STAR_BLENDED, workspace, workspace_bytes, &summary);
+    CHECK(status == IA_OK && summary.included_stars == 1u,
+        "shared centroid contributes only one independent stellar vote");
+    free(workspace);
+}
+
 static void make_focus_frame(
     uint16_t *image,
     int32_t focus,
@@ -535,6 +574,7 @@ int main(void)
     test_calculations();
     test_locked_noise_rejection();
     test_focus_rejected_centroid();
+    test_locked_duplicate_identity();
     test_focus_run();
     test_focus_diagnostic_exposure();
     test_focus_failures();

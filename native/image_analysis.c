@@ -1017,11 +1017,31 @@ int IA_CALL IA_MeasureLockedStars(
         ia_measure_candidate(
             pixels, width, height, stride_pixels, config, &candidate,
             &candidate, 1u, &measurements[i]);
+        {
+            uint32_t j;
+            double separation = config->minimum_separation_pixels;
+            /* One peak cannot vote as two independent locked stars. Retain
+               the first identity; reject later duplicates and their drift. */
+            for (j = 0u; j < i; ++j) {
+                double dx = ((double)measurements[i].x_milli -
+                             measurements[j].x_milli) / IA_MILLI;
+                double dy = ((double)measurements[i].y_milli -
+                             measurements[j].y_milli) / IA_MILLI;
+                if ((measurements[j].flags & IA_STAR_BLENDED) == 0u &&
+                    dx * dx + dy * dy < separation * separation) {
+                    measurements[i].flags |= IA_STAR_BLENDED;
+                    break;
+                }
+            }
+        }
         ia_debug_log(
-            "IA_MeasureLockedStars star=%u measured=(%d,%d) peak=%u hfd=%d flags=%u",
+            "IA_MeasureLockedStars star=%u measured=(%d,%d) peak=%u hfd=%d flags=%u snr=%d background=%d noise=%d flux=%u positive_pixels=%u",
             i, measurements[i].x_milli, measurements[i].y_milli,
             measurements[i].peak_adu, measurements[i].hfd_milli_pixels,
-            measurements[i].flags);
+            measurements[i].flags, measurements[i].snr_milli,
+            measurements[i].background_milli_adu,
+            measurements[i].noise_milli_adu,
+            measurements[i].flux_adu, measurements[i].positive_pixels);
     }
     ia_debug_log("IA_MeasureLockedStars exit status=%d",
         star_count == 0u ? IA_NO_STARS : IA_OK);

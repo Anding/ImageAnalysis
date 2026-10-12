@@ -45,6 +45,10 @@ Autofocus updates a locked search center only from an accepted measurement.
 Rejected/noise centroids must not walk a pending retake away from the star's
 last valid position. A transient-loss/return regression protects recovery.
 
+Overlapping locked searches can land on the same peak. A shared centroid
+retains the first identity and flags subsequent identities as blended using
+the supplied minimum separation, preventing duplicate stellar fit votes.
+
 Build `ImageAnalysis_project\ImageAnalysis_project.vcxproj` for
 `Release|Win32`. `native\test_image_analysis.c` contains dependency-free
 synthetic tests for detection, measurement, exposure calculation, and ROI
@@ -55,3 +59,6 @@ Native diagnostics are independent of Forth logging and are off by default.
 `IA_SetDebug(1)` (or `ia.debug-on`) appends immediately flushed calculation
 checkpoints to `E:\images\logs\image-analysis-native.log`;
 `IA_SetDebug(0)` (or `ia.debug-off`) disables them.
+Locked-star result checkpoints include SNR, local background/noise and
+positive-aperture flux/area, so unexpectedly large faint-star HFD can be
+investigated without changing acquisition or final-diagnostic exposure policy.
