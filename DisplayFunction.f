@@ -116,6 +116,8 @@ END-CODE
 ;
 
 LBL: <<MID>> ( ebx = x, edi = m, return in ebx)
+\ Maintenance: black zero-MAD frames can select m=x=0. Preserve MID's
+\ endpoint precedence before the fraction; otherwise the optimized path is 0/0.
     test    ebx, ebx
     jz      L$3
     cmp     ebx, edi

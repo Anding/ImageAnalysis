@@ -1,6 +1,7 @@
 \ Unit regression for the display-function parameter calculation.
 \ Maintenance: these exact integer results protect the Forth fixed-point
-\ contract independently of image loading and output codecs.
+\ contract independently of image loading and output codecs, including the
+\ bright-branch stats-field loads and zero-signal endpoint protection.
 
 need ImageAnalysis
 need simple-tester
