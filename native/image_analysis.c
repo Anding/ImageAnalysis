@@ -1166,6 +1166,8 @@ typedef struct IAFocusRun {
     IAStar measurements[IA_FOCUS_MAX_STARS];
     IAStar previous[IA_FOCUS_MAX_STARS];
     IAFocusPoint points[IA_FOCUS_MAX_STARS][IA_FOCUS_MAX_POINTS];
+    uint32_t successful_exposures_ms[IA_FOCUS_MAX_POINTS];
+    uint32_t discovery_exposure_ms;
     IARect roi;
     IAFocusResult result;
     int32_t center_focus;
@@ -1508,15 +1510,14 @@ static int ia_fit_v(
     return IA_OK;
 }
 
-static int ia_finish_focus_run(
-    IAFocusRun *run,
-    uint32_t recommended_exposure_ms)
+static int ia_finish_focus_run(IAFocusRun *run)
 {
     int32_t focus_values[IA_FOCUS_MAX_STARS];
     int32_t residual_values[IA_FOCUS_MAX_STARS];
     int32_t deviations[IA_FOCUS_MAX_STARS];
     uint32_t fitted = 0u;
     uint32_t i;
+    int64_t nearest_distance;
 
     for (i = 0u; i < run->star_count; ++i) {
         IAVFit fit;
@@ -1542,12 +1543,26 @@ static int ia_finish_focus_run(
     run->result.struct_size = sizeof(run->result);
     run->result.stars_locked = run->star_count;
     run->result.stars_fitted = fitted;
-    run->result.recommended_exposure_milliseconds =
-        recommended_exposure_ms;
     if (fitted == 0u) return IA_NO_STARS;
 
     run->result.focus_milli_steps =
         ia_median_i32(focus_values, fitted);
+    run->result.recommended_exposure_milliseconds =
+        run->discovery_exposure_ms;
+    nearest_distance = llabs(
+        (int64_t)run->center_focus * IA_MILLI -
+        run->result.focus_milli_steps);
+    for (i = 0u; i <= run->point_index; ++i) {
+        int64_t distance = llabs(
+            (int64_t)run->points[0][i].focus_position * IA_MILLI -
+            run->result.focus_milli_steps);
+        if (run->successful_exposures_ms[i] != 0u &&
+            distance <= nearest_distance) {
+            nearest_distance = distance;
+            run->result.recommended_exposure_milliseconds =
+                run->successful_exposures_ms[i];
+        }
+    }
     for (i = 0u; i < fitted; ++i) {
         int64_t difference =
             (int64_t)focus_values[i] -
@@ -1647,6 +1662,7 @@ int IA_CALL IA_BeginFocusRun(
     if (status != IA_OK) return status;
     status = ia_lock_compact_stars(run, summary.measured_stars);
     if (status != IA_OK) return status;
+    run->discovery_exposure_ms = exposure_milliseconds;
     status = IA_ComputeStarROI(
         run->locked, run->star_count, width, height,
         run->config.roi_margin_pixels, &run->roi);
@@ -1735,15 +1751,13 @@ int IA_CALL IA_SubmitFocusFrame(
             run->measurements[i].hfd_milli_pixels;
         point->flags = run->measurements[i].flags;
     }
+    if (usable == run->star_count && reason == IA_FOCUS_REASON_NONE) {
+        run->successful_exposures_ms[run->point_index] =
+            exposure_milliseconds;
+    }
     run->retry_count = 0u;
     if (run->point_index + 1u >= run->config.point_count) {
-        if (ia_focus_exposure(
-            run, run->measurements, previous, exposure_milliseconds,
-            run->config.step_maximum_change_milli, 1,
-            &recommended) != IA_OK) {
-            recommended = exposure_milliseconds;
-        }
-        if (ia_finish_focus_run(run, recommended) == IA_OK) {
+        if (ia_finish_focus_run(run) == IA_OK) {
             ia_focus_request(
                 run, request, IA_FOCUS_COMPLETE, reason,
                 (run->result.focus_milli_steps + 500) / IA_MILLI,

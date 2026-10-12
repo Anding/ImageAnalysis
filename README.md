@@ -24,6 +24,11 @@ The native API:
 - robustly combines independently fitted stellar focus positions;
 - returns an optional aggregate HFD diagnostic at the accepted focus.
 
+The completed autofocus result reuses the exact exposure from the successful
+discovery or sweep frame nearest the fitted focus, preferring the latest on
+equal distances. Frames with rejected, saturated, or low-SNR locked-star
+measurements are excluded; sweep exposure adaptation is unchanged.
+
 All arrays and workspaces are caller-owned. Metric values use milli-units so
 the ABI contains only 32-bit fields and is directly accessible from 32-bit
 VFX Forth. HFD is twice HFR. `FWHM` is the Gaussian-equivalent width derived

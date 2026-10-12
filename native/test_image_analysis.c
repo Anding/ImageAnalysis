@@ -282,6 +282,97 @@ static void test_focus_run(void)
     free(image);
 }
 
+static void test_focus_diagnostic_exposure(void)
+{
+    uint16_t *image =
+        (uint16_t *)malloc(WIDTH * HEIGHT * sizeof(uint16_t));
+    uint32_t run_bytes = IA_FocusRunBytes();
+    void *run = malloc(run_bytes);
+    IAConfig analysis_config;
+    IAFocusConfig focus_config;
+    IAFocusRequest request;
+    IAFocusResult result;
+    IAFocusDiagnostic diagnostic;
+    uint32_t variant;
+
+    CHECK(image != NULL && run != NULL, "allocate diagnostic exposure buffers");
+    if (image == NULL || run == NULL) {
+        free(image);
+        free(run);
+        return;
+    }
+    IA_DefaultConfig(&analysis_config);
+    IA_DefaultFocusConfig(&focus_config);
+    focus_config.star_limit = 3u;
+    focus_config.target_minimum_peak_adu = 5000u;
+    focus_config.target_maximum_peak_adu = 60000u;
+    focus_config.maximum_residual_milli = 1500u;
+    focus_config.search_radius_pixels = 4u;
+
+    for (variant = 0u; variant < 3u; ++variant) {
+        uint32_t observations = 0u;
+        int status;
+        make_focus_frame(image, 5030, 997u);
+        request.struct_size = sizeof(request);
+        status = IA_BeginFocusRun(
+            run, run_bytes, &focus_config, &analysis_config,
+            image, WIDTH, HEIGHT, WIDTH, 5030, 997u, &request);
+        while (status == IA_OK &&
+               (request.action == IA_FOCUS_CAPTURE ||
+                request.action == IA_FOCUS_RETAKE) &&
+               observations < 30u) {
+            int32_t position = request.focus_position;
+            uint32_t actual_exposure = position == 5030 ? 1234u : 1500u;
+            make_focus_frame(image, position, actual_exposure);
+            if (position == 5030 && variant == 1u) {
+                image[40u * WIDTH + 50u] = UINT16_MAX;
+            } else if (position == 5030 && variant == 2u) {
+                uint32_t x;
+                uint32_t y;
+                for (y = 0u; y < HEIGHT; ++y) {
+                    for (x = 0u; x < 65u; ++x) {
+                        image[y * WIDTH + x] = 1000u;
+                    }
+                }
+            }
+            status = IA_SubmitFocusFrame(
+                run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+                position, actual_exposure, &request);
+            if (position == 5030 && variant != 0u) {
+                uint32_t expected_reason = variant == 1u ?
+                    IA_FOCUS_REASON_SATURATED : IA_FOCUS_REASON_TOO_FAINT;
+                CHECK((request.reason_flags & expected_reason) != 0u,
+                    "mark unusable nearest sweep exposure");
+            }
+            ++observations;
+        }
+        CHECK(status == IA_OK && request.action == IA_FOCUS_COMPLETE,
+            "complete diagnostic exposure sweep");
+        result.struct_size = sizeof(result);
+        status = IA_EndFocusRun(run, &result);
+        CHECK(status == IA_OK &&
+              abs(result.focus_milli_steps - 5030000) < 5000,
+            "fit diagnostic exposure sweep");
+        CHECK(result.recommended_exposure_milliseconds ==
+              (variant == 0u ? 1234u : 997u),
+            "reuse exact nearest successful exposure, latest on ties");
+        CHECK(request.exposure_milliseconds ==
+              result.recommended_exposure_milliseconds,
+            "completion request carries diagnostic exposure");
+        make_focus_frame(
+            image, (result.focus_milli_steps + 500) / IA_MILLI,
+            result.recommended_exposure_milliseconds);
+        diagnostic.struct_size = sizeof(diagnostic);
+        status = IA_DiagnoseFocusFrame(
+            run, image, WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
+        CHECK(status == IA_OK && diagnostic.stars_measured == 3u &&
+              diagnostic.saturated_stars == 0u,
+            "nearest successful exposure gives unsaturated diagnostic");
+    }
+    free(run);
+    free(image);
+}
+
 static void test_focus_failures(void)
 {
     uint16_t *image =
@@ -362,6 +453,7 @@ int main(void)
     test_detection_and_measurement();
     test_calculations();
     test_focus_run();
+    test_focus_diagnostic_exposure();
     test_focus_failures();
     if (failures != 0) {
         fprintf(stderr, "%d native image-analysis test(s) failed\n", failures);
