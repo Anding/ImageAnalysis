@@ -508,6 +508,7 @@ static void ia_measure_candidate(
     double background = 0.0;
     double noise = 0.0;
     double flux = 0.0;
+    double signed_flux = 0.0;
     double weighted_x = 0.0;
     double weighted_y = 0.0;
     double moment_xx = 0.0;
@@ -517,6 +518,7 @@ static void ia_measure_candidate(
     double aperture_squared;
     uint32_t radius = config->aperture_radius_pixels;
     uint32_t positive_pixels = 0u;
+    uint32_t aperture_pixels = 0u;
     uint32_t saturated_pixels = 0u;
     uint32_t peak = 0u;
     int32_t left;
@@ -599,6 +601,8 @@ static void ia_measure_candidate(
             if (radius_squared <= aperture_squared) {
                 uint32_t value = row[x];
                 double signal = value - background;
+                signed_flux += signal;
+                ++aperture_pixels;
                 if (value > peak) {
                     peak = value;
                 }
@@ -677,7 +681,11 @@ static void ia_measure_candidate(
         sigma_minor = sqrt(lambda_minor);
         fwhm = 2.354820045 * sqrt(fmax(0.0, trace * 0.5));
         ellipticity = sigma_major > 0.0 ? 1.0 - sigma_minor / sigma_major : 0.0;
-        snr = noise > 0.0 ? flux / (noise * sqrt((double)positive_pixels)) : flux;
+        /* Positive clipping is required for HFD, not for signal quality:
+           rectified noise alone otherwise passes LOW_SNR and enters V fits. */
+        snr = noise > 0.0 ?
+            signed_flux / (noise * sqrt((double)aperture_pixels)) :
+            signed_flux;
 
         star->hfr_milli_pixels = ia_clamp_i32(hfr * IA_MILLI);
         star->hfd_milli_pixels = ia_clamp_i32(2.0 * hfr * IA_MILLI);

@@ -174,6 +174,34 @@ static void test_calculations(void)
         "ideal ROI bounds");
 }
 
+static void test_locked_noise_rejection(void)
+{
+    uint16_t image[WIDTH * HEIGHT];
+    IAConfig config;
+    IAStar locked;
+    IAStar measured;
+    uint32_t i;
+    int status;
+
+    /* Maintenance: rectifying aperture noise gives a large positive flux
+       and a plausible HFD even after a locked star has disappeared. */
+    for (i = 0u; i < WIDTH * HEIGHT; ++i) {
+        image[i] = (uint16_t)(1000u + (i * 17u + i / WIDTH * 13u) % 41u);
+    }
+    IA_DefaultConfig(&config);
+    memset(&locked, 0, sizeof(locked));
+    locked.struct_size = sizeof(locked);
+    locked.x_milli = 80000;
+    locked.y_milli = 60000;
+    status = IA_MeasureLockedStars(
+        image, WIDTH, HEIGHT, WIDTH, &config, &locked, 1u, 16u, &measured);
+    CHECK(status == IA_OK, "measure missing locked star");
+    CHECK((measured.flags & IA_STAR_LOW_SNR) != 0u,
+        "noise-only aperture must not masquerade as a usable locked star");
+    CHECK(measured.snr_milli < (int32_t)config.minimum_snr_milli,
+        "noise-only signal quality uses signed background-subtracted flux");
+}
+
 static void make_focus_frame(
     uint16_t *image,
     int32_t focus,
@@ -452,6 +480,7 @@ int main(void)
     test_debug_logging();
     test_detection_and_measurement();
     test_calculations();
+    test_locked_noise_rejection();
     test_focus_run();
     test_focus_diagnostic_exposure();
     test_focus_failures();

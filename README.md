@@ -35,6 +35,12 @@ VFX Forth. HFD is twice HFR. `FWHM` is the Gaussian-equivalent width derived
 from second moments and is identified as such because defocused stars need
 not have Gaussian profiles.
 
+Signal-to-noise uses signed background-subtracted aperture flux and all
+aperture pixels. HFD still uses positive flux as defined above. Do not reuse
+that rectified flux for SNR: noise-only apertures then appear significant and
+can masquerade as surviving locked stars. The synthetic locked-noise
+regression protects this distinction.
+
 Build `ImageAnalysis_project\ImageAnalysis_project.vcxproj` for
 `Release|Win32`. `native\test_image_analysis.c` contains dependency-free
 synthetic tests for detection, measurement, exposure calculation, and ROI
