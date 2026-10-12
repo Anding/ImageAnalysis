@@ -41,6 +41,10 @@ that rectified flux for SNR: noise-only apertures then appear significant and
 can masquerade as surviving locked stars. The synthetic locked-noise
 regression protects this distinction.
 
+Autofocus updates a locked search center only from an accepted measurement.
+Rejected/noise centroids must not walk a pending retake away from the star's
+last valid position. A transient-loss/return regression protects recovery.
+
 Build `ImageAnalysis_project\ImageAnalysis_project.vcxproj` for
 `Release|Win32`. `native\test_image_analysis.c` contains dependency-free
 synthetic tests for detection, measurement, exposure calculation, and ROI

@@ -1403,9 +1403,14 @@ static int ia_measure_focus_frame(
         run->config.search_radius_pixels, run->measurements);
     if (status != IA_OK) return status;
     for (i = 0u; i < run->star_count; ++i) {
-        run->locked[i] = run->measurements[i];
-        run->locked[i].x_milli += origin_x * IA_MILLI;
-        run->locked[i].y_milli += origin_y * IA_MILLI;
+        /* Keep the last valid identity during transient loss or retakes.
+           Rejected/noise centroids must not walk the search off its star. */
+        if ((run->measurements[i].flags &
+             run->config.reject_star_flags) == 0u) {
+            run->locked[i] = run->measurements[i];
+            run->locked[i].x_milli += origin_x * IA_MILLI;
+            run->locked[i].y_milli += origin_y * IA_MILLI;
+        }
     }
     return IA_OK;
 }

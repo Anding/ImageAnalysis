@@ -202,6 +202,59 @@ static void test_locked_noise_rejection(void)
         "noise-only signal quality uses signed background-subtracted flux");
 }
 
+static void test_focus_rejected_centroid(void)
+{
+    uint16_t image[WIDTH * HEIGHT];
+    uint32_t run_bytes = IA_FocusRunBytes();
+    void *run = malloc(run_bytes);
+    IAConfig analysis_config;
+    IAFocusConfig focus_config;
+    IAFocusRequest request;
+    IAFocusDiagnostic diagnostic;
+    uint32_t i;
+    uint32_t attempt;
+    int status;
+
+    CHECK(run != NULL, "allocate rejected-centroid test run");
+    if (run == NULL) return;
+    IA_DefaultConfig(&analysis_config);
+    IA_DefaultFocusConfig(&focus_config);
+    focus_config.star_limit = 2u;
+    request.struct_size = sizeof(request);
+    for (i = 0u; i < WIDTH * HEIGHT; ++i) image[i] = 1000u;
+    add_gaussian(image, 50.0, 40.0, 2.0, 2.0, 30000.0);
+    add_gaussian(image, 130.0, 80.0, 2.0, 2.0, 25000.0);
+    status = IA_BeginFocusRun(
+        run, run_bytes, &focus_config, &analysis_config,
+        image, WIDTH, HEIGHT, WIDTH, 5000, 1000u, &request);
+    CHECK(status == IA_OK, "begin rejected-centroid test");
+    if (status != IA_OK) {
+        free(run);
+        return;
+    }
+    /* Maintenance: rejected peaks must not walk a locked search center away
+       from its last valid star while another usable star advances the run. */
+    for (attempt = 0u; attempt < 3u; ++attempt) {
+        for (i = 0u; i < WIDTH * HEIGHT; ++i) image[i] = 1000u;
+        add_gaussian(image, 130.0, 80.0, 2.0, 2.0, 25000.0);
+        image[40u * WIDTH + 64u + attempt * 14u] = 65535u;
+        status = IA_SubmitFocusFrame(
+            run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+            request.focus_position, 1000u, &request);
+        CHECK(status == IA_OK && request.action == IA_FOCUS_CAPTURE,
+            "another usable star advances past a rejected centroid");
+    }
+    for (i = 0u; i < WIDTH * HEIGHT; ++i) image[i] = 1000u;
+    add_gaussian(image, 50.0, 40.0, 2.0, 2.0, 30000.0);
+    add_gaussian(image, 130.0, 80.0, 2.0, 2.0, 25000.0);
+    diagnostic.struct_size = sizeof(diagnostic);
+    status = IA_DiagnoseFocusFrame(
+        run, image, WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
+    CHECK(status == IA_OK && diagnostic.stars_measured == 2u,
+        "returning star is recovered at its last valid locked position");
+    free(run);
+}
+
 static void make_focus_frame(
     uint16_t *image,
     int32_t focus,
@@ -481,6 +534,7 @@ int main(void)
     test_detection_and_measurement();
     test_calculations();
     test_locked_noise_rejection();
+    test_focus_rejected_centroid();
     test_focus_run();
     test_focus_diagnostic_exposure();
     test_focus_failures();
