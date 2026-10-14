@@ -875,6 +875,7 @@ int IA_CALL IA_SummarizeStars(
 
 int IA_CALL IA_AnalyzeFrame(
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -886,6 +887,8 @@ int IA_CALL IA_AnalyzeFrame(
     IAFrameSummary *summary)
 {
     IAWorkspaceView view;
+    uint64_t required_pixels;
+    uint64_t required_bytes;
     uint32_t median;
     double noise;
     double threshold_delta;
@@ -896,8 +899,8 @@ int IA_CALL IA_AnalyzeFrame(
     int status;
 
     ia_debug_log(
-        "IA_AnalyzeFrame enter width=%u height=%u stride=%u capacity=%u workspace=%u",
-        width, height, stride_pixels, star_capacity, workspace_bytes);
+        "IA_AnalyzeFrame enter bytes=%u width=%u height=%u stride=%u capacity=%u workspace=%u",
+        frame_size_bytes, width, height, stride_pixels, star_capacity, workspace_bytes);
     if (pixels == NULL || config == NULL || stars == NULL || summary == NULL ||
         width == 0u || height == 0u || stride_pixels < width || star_capacity == 0u ||
         config->struct_size < sizeof(*config) || summary->struct_size < sizeof(*summary) ||
@@ -905,6 +908,13 @@ int IA_CALL IA_AnalyzeFrame(
         config->annulus_inner_radius_pixels <= config->aperture_radius_pixels ||
         config->annulus_outer_radius_pixels <= config->annulus_inner_radius_pixels) {
         ia_debug_log("IA_AnalyzeFrame invalid argument");
+        return IA_INVALID_ARGUMENT;
+    }
+    required_pixels = (uint64_t)(height - 1u) * stride_pixels + width;
+    required_bytes = required_pixels * sizeof(*pixels);
+    if (required_bytes > frame_size_bytes) {
+        ia_debug_log("IA_AnalyzeFrame frame too small required=%llu available=%u",
+            (unsigned long long)required_bytes, frame_size_bytes);
         return IA_INVALID_ARGUMENT;
     }
 
@@ -1654,6 +1664,7 @@ int IA_CALL IA_BeginFocusRun(
     const IAFocusConfig *focus_config,
     const IAConfig *analysis_config,
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -1671,7 +1682,7 @@ int IA_CALL IA_BeginFocusRun(
         !ia_focus_config_valid(focus_config) ||
         analysis_config == NULL ||
         analysis_config->struct_size < sizeof(*analysis_config) ||
-        pixels == NULL || width == 0u || height == 0u ||
+        pixels == NULL || frame_size_bytes == 0u || width == 0u || height == 0u ||
         stride_pixels < width || exposure_milliseconds == 0u ||
         request == NULL || request->struct_size < sizeof(*request)) {
         return IA_INVALID_ARGUMENT;
@@ -1688,7 +1699,7 @@ int IA_CALL IA_BeginFocusRun(
     workspace = (uint8_t *)run_memory + sizeof(*run);
     summary.struct_size = sizeof(summary);
     status = IA_AnalyzeFrame(
-        pixels, width, height, stride_pixels,
+        pixels, frame_size_bytes, width, height, stride_pixels,
         &run->analysis_config, workspace,
         ia_workspace_bytes(IA_FOCUS_CANDIDATES),
         run->candidates, IA_FOCUS_CANDIDATES, &summary);

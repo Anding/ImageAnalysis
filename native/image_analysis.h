@@ -187,6 +187,7 @@ IA_EXPORT uint32_t IA_CALL IA_WorkspaceBytes(uint32_t maximum_stars);
 
 IA_EXPORT int IA_CALL IA_AnalyzeFrame(
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -243,6 +244,7 @@ IA_EXPORT int IA_CALL IA_BeginFocusRun(
     const IAFocusConfig *focus_config,
     const IAConfig *analysis_config,
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,

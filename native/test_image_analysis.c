@@ -112,10 +112,16 @@ static void test_detection_and_measurement(void)
     IA_DefaultConfig(&config);
     summary.struct_size = sizeof(summary);
     status = IA_AnalyzeFrame(
-        image, WIDTH, HEIGHT, WIDTH, &config, workspace, workspace_bytes,
+        image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH,
+        &config, workspace, workspace_bytes,
         stars, STAR_CAPACITY, &summary);
 
     CHECK(status == IA_OK, "analyze synthetic image");
+    status = IA_AnalyzeFrame(
+        image, WIDTH * HEIGHT * sizeof(*image) - sizeof(*image),
+        WIDTH, HEIGHT, WIDTH, &config, workspace, workspace_bytes,
+        stars, STAR_CAPACITY, &summary);
+    CHECK(status == IA_INVALID_ARGUMENT, "reject undersized frame buffer");
     CHECK(summary.measured_stars >= 3u, "detect three synthetic stars");
     CHECK(summary.background_milli_adu >= 1000000 &&
           summary.background_milli_adu <= 1006000, "global background");
@@ -226,7 +232,8 @@ static void test_focus_rejected_centroid(void)
     add_gaussian(image, 130.0, 80.0, 2.0, 2.0, 25000.0);
     status = IA_BeginFocusRun(
         run, run_bytes, &focus_config, &analysis_config,
-        image, WIDTH, HEIGHT, WIDTH, 5000, 1000u, &request);
+        image, WIDTH * HEIGHT * sizeof(*image),
+        WIDTH, HEIGHT, WIDTH, 5000, 1000u, &request);
     CHECK(status == IA_OK, "begin rejected-centroid test");
     if (status != IA_OK) {
         free(run);
@@ -348,7 +355,8 @@ static void test_focus_run(void)
     request.struct_size = sizeof(request);
     status = IA_BeginFocusRun(
         run, run_bytes, &focus_config, &analysis_config,
-        image, WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
+        image, WIDTH * HEIGHT * sizeof(*image),
+        WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
     CHECK(status == IA_OK, "begin bitmap-driven focus run");
     CHECK(request.action == IA_FOCUS_CAPTURE, "request first focus frame");
     CHECK(request.roi.width > 0 && request.roi.height > 0,
@@ -436,7 +444,8 @@ static void test_focus_diagnostic_exposure(void)
         request.struct_size = sizeof(request);
         status = IA_BeginFocusRun(
             run, run_bytes, &focus_config, &analysis_config,
-            image, WIDTH, HEIGHT, WIDTH, 5030, 997u, &request);
+            image, WIDTH * HEIGHT * sizeof(*image),
+            WIDTH, HEIGHT, WIDTH, 5030, 997u, &request);
         while (status == IA_OK &&
                (request.action == IA_FOCUS_CAPTURE ||
                 request.action == IA_FOCUS_RETAKE) &&
@@ -522,7 +531,8 @@ static void test_focus_failures(void)
     request.struct_size = sizeof(request);
     status = IA_BeginFocusRun(
         run, run_bytes, &focus_config, &analysis_config,
-        image, WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
+        image, WIDTH * HEIGHT * sizeof(*image),
+        WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
     saw_retake = 0;
     for (submissions = 0u;
          status == IA_OK && request.action != IA_FOCUS_FAILED &&
@@ -546,7 +556,8 @@ static void test_focus_failures(void)
     request.struct_size = sizeof(request);
     status = IA_BeginFocusRun(
         run, run_bytes, &focus_config, &analysis_config,
-        image, WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
+        image, WIDTH * HEIGHT * sizeof(*image),
+        WIDTH, HEIGHT, WIDTH, 5030, 1000u, &request);
     for (submissions = 0u;
          status == IA_OK &&
          (request.action == IA_FOCUS_CAPTURE ||

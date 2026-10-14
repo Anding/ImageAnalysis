@@ -9,8 +9,10 @@ FITS metadata map. `SATPIX` is the exact number of pixels in histogram bin
 ## Native star analysis
 
 `native\image_analysis.c` builds as the 32-bit `ImageAnalysisNative.dll` used
-by VFX Forth. It operates directly on an in-memory unsigned 16-bit frame; file
-loading, acquisition policy, and hardware control remain in Forth.
+by VFX Forth. It operates directly on an in-memory unsigned 16-bit frame; the
+caller supplies the allocation capacity and native analysis rejects a geometry
+that would read beyond it. File loading, acquisition policy, and hardware
+control remain in Forth.
 
 The native API:
 

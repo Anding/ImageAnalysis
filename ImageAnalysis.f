@@ -11,7 +11,8 @@ Extern: void "C" IA_SetDebug( int enabled ) ;
 Extern: void "C" IA_DefaultConfig( int * config ) ;
 Extern: int "C" IA_WorkspaceBytes( int maximum_stars ) ;
 Extern: int "C" IA_AnalyzeFrame(
-    int * pixels, int width, int height, int stride_pixels,
+    int * pixels, int frame_size_bytes,
+    int width, int height, int stride_pixels,
     int * config, int * workspace, int workspace_bytes,
     int * stars, int star_capacity, int * summary
 ) ;
@@ -37,7 +38,8 @@ Extern: int "C" IA_FocusRunBytes() ;
 Extern: void "C" IA_DefaultFocusConfig( int * config ) ;
 Extern: int "C" IA_BeginFocusRun(
     int * run, int run_bytes, int * focus_config, int * analysis_config,
-    int * pixels, int width, int height, int stride_pixels,
+    int * pixels, int frame_size_bytes,
+    int width, int height, int stride_pixels,
     int center_focus_position, int exposure_milliseconds, int * request
 ) ;
 Extern: int "C" IA_SubmitFocusFrame(
@@ -262,6 +264,7 @@ create ia.roi <IA_RECT> allot
     <IA_FOCUS_REQUEST> request IA_FOCUS_REQUEST.struct_size !
     run run-bytes focus-config ia.config
     img FRAME_BITMAP
+    img frame-capacity
     img FRAME_WIDTH @
     img FRAME_HEIGHT @
     img FRAME_WIDTH @
@@ -328,6 +331,7 @@ create ia.roi <IA_RECT> allot
 \ Analyze the current in-memory 16-bit frame; Forth owns rejection policy.
     <IA_FRAME_SUMMARY> ia.summary IA_FRAME_SUMMARY.struct_size !
     img FRAME_BITMAP
+    img frame-capacity
     img FRAME_WIDTH @
     img FRAME_HEIGHT @
     img FRAME_WIDTH @
