@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define IA_API_VERSION 2u
+#define IA_API_VERSION 3u
 #define IA_MILLI 1000
 #define IA_FOCUS_MAX_STARS 7u
 #define IA_FOCUS_MAX_POINTS 15u
@@ -208,6 +208,7 @@ IA_EXPORT int IA_CALL IA_SummarizeStars(
 
 IA_EXPORT int IA_CALL IA_MeasureLockedStars(
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -255,6 +256,7 @@ IA_EXPORT int IA_CALL IA_BeginFocusRun(
 IA_EXPORT int IA_CALL IA_SubmitFocusFrame(
     void *run,
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -271,6 +273,7 @@ IA_EXPORT int IA_CALL IA_EndFocusRun(
 IA_EXPORT int IA_CALL IA_DiagnoseFocusFrame(
     void *run,
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,

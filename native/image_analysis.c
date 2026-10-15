@@ -873,6 +873,18 @@ int IA_CALL IA_SummarizeStars(
     return IA_OK;
 }
 
+static int ia_frame_fits(
+    uint32_t frame_size_bytes,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride_pixels)
+{
+    uint64_t required_pixels;
+    if (width == 0u || height == 0u || stride_pixels < width) return 0;
+    required_pixels = (uint64_t)(height - 1u) * stride_pixels + width;
+    return required_pixels <= frame_size_bytes / sizeof(uint16_t);
+}
+
 int IA_CALL IA_AnalyzeFrame(
     const uint16_t *pixels,
     uint32_t frame_size_bytes,
@@ -887,8 +899,6 @@ int IA_CALL IA_AnalyzeFrame(
     IAFrameSummary *summary)
 {
     IAWorkspaceView view;
-    uint64_t required_pixels;
-    uint64_t required_bytes;
     uint32_t median;
     double noise;
     double threshold_delta;
@@ -910,11 +920,8 @@ int IA_CALL IA_AnalyzeFrame(
         ia_debug_log("IA_AnalyzeFrame invalid argument");
         return IA_INVALID_ARGUMENT;
     }
-    required_pixels = (uint64_t)(height - 1u) * stride_pixels + width;
-    required_bytes = required_pixels * sizeof(*pixels);
-    if (required_bytes > frame_size_bytes) {
-        ia_debug_log("IA_AnalyzeFrame frame too small required=%llu available=%u",
-            (unsigned long long)required_bytes, frame_size_bytes);
+    if (!ia_frame_fits(frame_size_bytes, width, height, stride_pixels)) {
+        ia_debug_log("IA_AnalyzeFrame frame too small available=%u", frame_size_bytes);
         return IA_INVALID_ARGUMENT;
     }
 
@@ -971,6 +978,7 @@ int IA_CALL IA_AnalyzeFrame(
 
 int IA_CALL IA_MeasureLockedStars(
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -983,11 +991,12 @@ int IA_CALL IA_MeasureLockedStars(
     uint32_t i;
 
     ia_debug_log(
-        "IA_MeasureLockedStars enter width=%u height=%u stride=%u stars=%u radius=%u",
-        width, height, stride_pixels, star_count, search_radius_pixels);
+        "IA_MeasureLockedStars enter bytes=%u width=%u height=%u stride=%u stars=%u radius=%u",
+        frame_size_bytes, width, height, stride_pixels, star_count, search_radius_pixels);
     if (pixels == NULL || config == NULL || locked_stars == NULL ||
-        measurements == NULL || width == 0u || height == 0u ||
-        stride_pixels < width || config->struct_size < sizeof(*config)) {
+        measurements == NULL ||
+        !ia_frame_fits(frame_size_bytes, width, height, stride_pixels) ||
+        config->struct_size < sizeof(*config)) {
         ia_debug_log("IA_MeasureLockedStars invalid argument");
         return IA_INVALID_ARGUMENT;
     }
@@ -1412,6 +1421,7 @@ static int ia_lock_compact_stars(IAFocusRun *run, uint32_t measured_stars)
 static int ia_measure_focus_frame(
     IAFocusRun *run,
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -1428,7 +1438,7 @@ static int ia_measure_focus_frame(
         local_locked[i].y_milli -= origin_y * IA_MILLI;
     }
     status = IA_MeasureLockedStars(
-        pixels, width, height, stride_pixels,
+        pixels, frame_size_bytes, width, height, stride_pixels,
         &run->analysis_config, local_locked, run->star_count,
         run->config.search_radius_pixels, run->measurements);
     if (status != IA_OK) return status;
@@ -1729,6 +1739,7 @@ int IA_CALL IA_BeginFocusRun(
 int IA_CALL IA_SubmitFocusFrame(
     void *run_memory,
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -1753,7 +1764,7 @@ int IA_CALL IA_SubmitFocusFrame(
         return IA_INVALID_ARGUMENT;
     }
     status = ia_measure_focus_frame(
-        run, pixels, width, height, stride_pixels, origin_x, origin_y);
+        run, pixels, frame_size_bytes, width, height, stride_pixels, origin_x, origin_y);
     if (status != IA_OK) return status;
     for (i = 0u; i < run->star_count; ++i) {
         if ((run->measurements[i].flags &
@@ -1859,6 +1870,7 @@ int IA_CALL IA_EndFocusRun(
 int IA_CALL IA_DiagnoseFocusFrame(
     void *run_memory,
     const uint16_t *pixels,
+    uint32_t frame_size_bytes,
     uint32_t width,
     uint32_t height,
     uint32_t stride_pixels,
@@ -1880,7 +1892,7 @@ int IA_CALL IA_DiagnoseFocusFrame(
         return IA_INVALID_ARGUMENT;
     }
     status = ia_measure_focus_frame(
-        run, pixels, width, height, stride_pixels, origin_x, origin_y);
+        run, pixels, frame_size_bytes, width, height, stride_pixels, origin_x, origin_y);
     if (status != IA_OK) return status;
     for (i = 0u; i < run->star_count; ++i) {
         if ((run->measurements[i].flags & IA_STAR_SATURATED) != 0u) {

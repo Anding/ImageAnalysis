@@ -14,6 +14,11 @@ caller supplies the allocation capacity and native analysis rejects a geometry
 that would read beyond it. File loading, acquisition policy, and hardware
 control remain in Forth.
 
+API version 3 requires byte capacity on every bitmap-taking entry point,
+including locked-star measurement, focus submission and diagnostics. The check
+includes row stride and runs before reading pixels. Forth refuses a different
+DLL API version at load time; deploy the rebuilt DLL with its matching binding.
+
 The native API:
 
 - estimates a global median/MAD background;

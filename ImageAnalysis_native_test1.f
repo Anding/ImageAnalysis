@@ -42,8 +42,8 @@ IA_FocusRunBytes constant native.test.focus-run-bytes
 native.test.focus-run-bytes allocate throw constant native.test.focus-run
 
 Tstart
-T{ IA_Version }T 2 ==
-T{ ia.debug-on ia.debug-off IA_Version }T 2 ==
+T{ IA_Version }T 3 ==
+T{ ia.debug-on ia.debug-off IA_Version }T 3 ==
 T{ ia.summary IA_FRAME_SUMMARY.detected_stars @ 0> }T -1 ==
 T{ ia.summary IA_FRAME_SUMMARY.included_stars @ }T 1 ==
 T{ 0 ia.star IA_STAR.x_milli @ 31000 33000 within }T -1 ==
@@ -63,6 +63,19 @@ T{ native.test.focus-request IA_FOCUS_REQUEST.action @
     }T IA.FOCUS.CAPTURE ==
 T{ native.test.focus-request IA_FOCUS_REQUEST.roi_width @ 0>
     }T -1 ==
+create native.test.diagnostic <IA_FOCUS_DIAGNOSTIC> allot
+8190 native.test.frame FRAME_CAPACITY_BYTES !
+T{ native.test.frame 0 ia.star 1 5 native.test.measurement
+    ia.measure-locked }T -1 ==
+T{ native.test.focus-run native.test.frame 0 0 5000 1000
+    native.test.focus-request ia.submit-focus }T -1 ==
+T{ native.test.focus-run native.test.frame 0 0 native.test.diagnostic
+    ia.diagnose-focus }T -1 ==
+8192 native.test.frame FRAME_CAPACITY_BYTES !
+T{ native.test.focus-run native.test.frame 0 0 5000 1000
+    native.test.focus-request ia.submit-focus }T 0 ==
+T{ native.test.focus-run native.test.frame 0 0 native.test.diagnostic
+    ia.diagnose-focus }T 0 ==
 Tend
 
 native.test.focus-run free throw

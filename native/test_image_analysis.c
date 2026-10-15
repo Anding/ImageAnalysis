@@ -147,10 +147,23 @@ static void test_detection_and_measurement(void)
         locked.x_milli += 2000;
         locked.y_milli -= 2000;
         status = IA_MeasureLockedStars(
-            image, WIDTH, HEIGHT, WIDTH, &config, &locked, 1u, 4u, &measured);
+            image, WIDTH * HEIGHT * sizeof(*image),
+            WIDTH, HEIGHT, WIDTH, &config, &locked, 1u, 4u, &measured);
         CHECK(status == IA_OK, "remeasure locked star");
         CHECK(abs(measured.x_milli - 70250) < 150, "relocate locked star x");
         CHECK(abs(measured.y_milli - 50750) < 150, "relocate locked star y");
+        status = IA_MeasureLockedStars(
+            image, WIDTH * HEIGHT * sizeof(*image) - 1u,
+            WIDTH, HEIGHT, WIDTH, &config, &locked, 1u, 4u, &measured);
+        CHECK(status == IA_INVALID_ARGUMENT, "reject short locked-star buffer");
+        status = IA_MeasureLockedStars(
+            image, WIDTH * HEIGHT * sizeof(*image),
+            WIDTH, HEIGHT, WIDTH + 1u, &config, &locked, 1u, 4u, &measured);
+        CHECK(status == IA_INVALID_ARGUMENT, "include stride in locked-star bounds");
+        status = IA_AnalyzeFrame(
+            image, 2u, 2u, UINT32_MAX, 0x80000001u,
+            &config, workspace, workspace_bytes, stars, STAR_CAPACITY, &summary);
+        CHECK(status == IA_INVALID_ARGUMENT, "reject geometry without byte overflow");
     }
 
     free(workspace);
@@ -200,7 +213,8 @@ static void test_locked_noise_rejection(void)
     locked.x_milli = 80000;
     locked.y_milli = 60000;
     status = IA_MeasureLockedStars(
-        image, WIDTH, HEIGHT, WIDTH, &config, &locked, 1u, 16u, &measured);
+        image, WIDTH * HEIGHT * sizeof(*image),
+        WIDTH, HEIGHT, WIDTH, &config, &locked, 1u, 16u, &measured);
     CHECK(status == IA_OK, "measure missing locked star");
     CHECK((measured.flags & IA_STAR_LOW_SNR) != 0u,
         "noise-only aperture must not masquerade as a usable locked star");
@@ -246,7 +260,7 @@ static void test_focus_rejected_centroid(void)
         add_gaussian(image, 130.0, 80.0, 2.0, 2.0, 25000.0);
         image[40u * WIDTH + 64u + attempt * 14u] = 65535u;
         status = IA_SubmitFocusFrame(
-            run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+            run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0,
             request.focus_position, 1000u, &request);
         CHECK(status == IA_OK && request.action == IA_FOCUS_CAPTURE,
             "another usable star advances past a rejected centroid");
@@ -256,7 +270,7 @@ static void test_focus_rejected_centroid(void)
     add_gaussian(image, 130.0, 80.0, 2.0, 2.0, 25000.0);
     diagnostic.struct_size = sizeof(diagnostic);
     status = IA_DiagnoseFocusFrame(
-        run, image, WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
+        run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
     CHECK(status == IA_OK && diagnostic.stars_measured == 2u,
         "returning star is recovered at its last valid locked position");
     free(run);
@@ -287,7 +301,8 @@ static void test_locked_duplicate_identity(void)
     locked[1].x_milli = 90000;
     locked[1].y_milli = 60000;
     status = IA_MeasureLockedStars(
-        image, WIDTH, HEIGHT, WIDTH, &config, locked, 2u, 16u, measured);
+        image, WIDTH * HEIGHT * sizeof(*image),
+        WIDTH, HEIGHT, WIDTH, &config, locked, 2u, 16u, measured);
     CHECK(status == IA_OK, "measure overlapping locked searches");
     CHECK((measured[0].flags & IA_STAR_BLENDED) == 0u,
         "retain first identity at shared peak");
@@ -361,6 +376,17 @@ static void test_focus_run(void)
     CHECK(request.action == IA_FOCUS_CAPTURE, "request first focus frame");
     CHECK(request.roi.width > 0 && request.roi.height > 0,
         "recommend compact focus ROI");
+    status = IA_SubmitFocusFrame(
+        run, image, WIDTH * HEIGHT * sizeof(*image) - 1u,
+        WIDTH, HEIGHT, WIDTH, 0, 0,
+        request.focus_position, request.exposure_milliseconds, &request);
+    CHECK(status == IA_INVALID_ARGUMENT, "reject short focus submission");
+    diagnostic.struct_size = sizeof(diagnostic);
+    status = IA_DiagnoseFocusFrame(
+        run, image, WIDTH * HEIGHT * sizeof(*image),
+        WIDTH, HEIGHT, WIDTH + 1u, 0, 0, &diagnostic);
+    CHECK(status == IA_INVALID_ARGUMENT, "reject diagnostic stride beyond buffer");
+    status = IA_OK;
 
     while (status == IA_OK &&
            (request.action == IA_FOCUS_CAPTURE ||
@@ -370,7 +396,7 @@ static void test_focus_run(void)
             image, request.focus_position,
             request.exposure_milliseconds);
         status = IA_SubmitFocusFrame(
-            run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+            run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0,
             request.focus_position, request.exposure_milliseconds,
             &request);
         ++observations;
@@ -392,7 +418,7 @@ static void test_focus_run(void)
         result.recommended_exposure_milliseconds);
     diagnostic.struct_size = sizeof(diagnostic);
     status = IA_DiagnoseFocusFrame(
-        run, image, WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
+        run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
     CHECK(status == IA_OK, "diagnose verification frame");
     CHECK(diagnostic.stars_measured >= 1u &&
           diagnostic.median_hfd_milli_pixels > 0,
@@ -401,7 +427,7 @@ static void test_focus_run(void)
     image[40u * WIDTH + 50u] = UINT16_MAX;
     diagnostic.struct_size = sizeof(diagnostic);
     status = IA_DiagnoseFocusFrame(
-        run, image, WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
+        run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
     CHECK(status == IA_OK, "diagnose partially saturated frame");
     CHECK(diagnostic.saturated_stars == 1u &&
           diagnostic.stars_measured >= 1u,
@@ -465,7 +491,7 @@ static void test_focus_diagnostic_exposure(void)
                 }
             }
             status = IA_SubmitFocusFrame(
-                run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+                run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0,
                 position, actual_exposure, &request);
             if (position == 5030 && variant != 0u) {
                 uint32_t expected_reason = variant == 1u ?
@@ -493,7 +519,7 @@ static void test_focus_diagnostic_exposure(void)
             result.recommended_exposure_milliseconds);
         diagnostic.struct_size = sizeof(diagnostic);
         status = IA_DiagnoseFocusFrame(
-            run, image, WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
+            run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0, &diagnostic);
         CHECK(status == IA_OK && diagnostic.stars_measured == 3u &&
               diagnostic.saturated_stars == 0u,
             "nearest successful exposure gives unsaturated diagnostic");
@@ -540,7 +566,7 @@ static void test_focus_failures(void)
          ++submissions) {
         make_focus_frame(image, request.focus_position, 10000u);
         status = IA_SubmitFocusFrame(
-            run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+            run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0,
             request.focus_position, 10000u,
             &request);
         if (request.action == IA_FOCUS_RETAKE) saw_retake = 1;
@@ -566,7 +592,7 @@ static void test_focus_failures(void)
          ++submissions) {
         make_focus_frame(image, 4900, request.exposure_milliseconds);
         status = IA_SubmitFocusFrame(
-            run, image, WIDTH, HEIGHT, WIDTH, 0, 0,
+            run, image, WIDTH * HEIGHT * sizeof(*image), WIDTH, HEIGHT, WIDTH, 0, 0,
             request.focus_position, request.exposure_milliseconds,
             &request);
     }

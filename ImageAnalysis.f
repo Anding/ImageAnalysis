@@ -7,6 +7,11 @@ need ForthAstroFormats
 
 LIBRARY: ImageAnalysisNative.dll
 Extern: int "C" IA_Version() ;
+: ia.require-version ( -- )
+    IA_Version 3 <> abort" ImageAnalysisNative.dll API 3 required"
+;
+ia.require-version
+
 Extern: void "C" IA_SetDebug( int enabled ) ;
 Extern: void "C" IA_DefaultConfig( int * config ) ;
 Extern: int "C" IA_WorkspaceBytes( int maximum_stars ) ;
@@ -21,7 +26,7 @@ Extern: int "C" IA_SummarizeStars(
     int * workspace, int workspace_bytes, int * summary
 ) ;
 Extern: int "C" IA_MeasureLockedStars(
-    int * pixels, int width, int height, int stride_pixels,
+    int * pixels, int frame_size_bytes, int width, int height, int stride_pixels,
     int * config, int * locked_stars, int star_count,
     int search_radius_pixels, int * measurements
 ) ;
@@ -43,7 +48,7 @@ Extern: int "C" IA_BeginFocusRun(
     int center_focus_position, int exposure_milliseconds, int * request
 ) ;
 Extern: int "C" IA_SubmitFocusFrame(
-    int * run, int * pixels, int width, int height, int stride_pixels,
+    int * run, int * pixels, int frame_size_bytes, int width, int height, int stride_pixels,
     int origin_x, int origin_y, int focus_position,
     int exposure_milliseconds, int * request
 ) ;
@@ -51,7 +56,7 @@ Extern: int "C" IA_EndFocusRun(
     int * run, int * result
 ) ;
 Extern: int "C" IA_DiagnoseFocusFrame(
-    int * run, int * pixels, int width, int height, int stride_pixels,
+    int * run, int * pixels, int frame_size_bytes, int width, int height, int stride_pixels,
     int origin_x, int origin_y, int * diagnostic
 ) ;
 
@@ -227,6 +232,7 @@ ia.config IA_DefaultConfig
 
 : ia.measure-locked { img locked count search-radius results -- status }
     img FRAME_BITMAP
+    img frame-capacity
     img FRAME_WIDTH @
     img FRAME_HEIGHT @
     img FRAME_WIDTH @
@@ -277,6 +283,7 @@ create ia.roi <IA_RECT> allot
     <IA_FOCUS_REQUEST> request IA_FOCUS_REQUEST.struct_size !
     run
     img FRAME_BITMAP
+    img frame-capacity
     img FRAME_WIDTH @
     img FRAME_HEIGHT @
     img FRAME_WIDTH @
@@ -295,6 +302,7 @@ create ia.roi <IA_RECT> allot
         diagnostic IA_FOCUS_DIAGNOSTIC.struct_size !
     run
     img FRAME_BITMAP
+    img frame-capacity
     img FRAME_WIDTH @
     img FRAME_HEIGHT @
     img FRAME_WIDTH @
