@@ -48,8 +48,8 @@ T{ ia.summary IA_FRAME_SUMMARY.detected_stars @ 0> }T -1 ==
 T{ ia.summary IA_FRAME_SUMMARY.included_stars @ }T 1 ==
 T{ 0 ia.star IA_STAR.x_milli @ 31000 33000 within }T -1 ==
 T{ 0 ia.star IA_STAR.y_milli @ 30000 32000 within }T -1 ==
-T{ s" NSTARS" native.test.frame FRAME_METADATA @ >string hashS }T s" 1" hashS ==
-T{ s" HFD" native.test.frame FRAME_METADATA @ >string nip 0> }T -1 ==
+T{ s" NSTARS" native.test.frame FRAME_METADATA @ map@ hashS }T s" 1" hashS ==
+T{ s" HFD" native.test.frame FRAME_METADATA @ map@ nip 0> }T -1 ==
 T{ 1000 21000 1000 41000 100 10000 4000 ia.recommend-exposure }T 2000 0 ==
 T{ 0 ia.star 1 64 64 5 ia.compute-roi
     swap IA_RECT.width @ swap }T 11 0 ==

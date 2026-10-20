@@ -4,6 +4,7 @@
 \ width, status values, and struct_size initialization synchronized with
 \ native\image_analysis.h; policy and hardware sequencing belong to callers.
 need ForthAstroFormats
+need ordered-maps
 
 LIBRARY: ImageAnalysisNative.dll
 Extern: int "C" IA_Version() ;

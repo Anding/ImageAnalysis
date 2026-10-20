@@ -55,7 +55,7 @@ T{ image FRAME_STATISTICS @ TOTAL_PIXELS @ }T 640 480 * ==
 T{ image FRAME_STATISTICS @ MEAN @ }T 32768 ==
 T{ image FRAME_STATISTICS @ MEDIAN @ }T 32768 ==
 T{ image FRAME_STATISTICS @ histogram.saturated }T 1 ==
-T{ s" SATPIX" image FRAME_METADATA @ >string hashS }T s" 1" hashS ==
+T{ s" SATPIX" image FRAME_METADATA @ map@ hashS }T s" 1" hashS ==
 Tend
 
 image free-frame
