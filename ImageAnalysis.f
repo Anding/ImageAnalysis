@@ -1,362 +1,6 @@
-\ Direct Forth binding to the native astronomical image-analysis library.
-\
-\ Maintenance: structure layouts below are the ABI.  Keep field order, cell
-\ width, status values, and struct_size initialization synchronized with
-\ native\image_analysis.h; policy and hardware sequencing belong to callers.
+\ Image histograms, pixel statistics and image combination.
 need ForthAstroFormats
 need ordered-maps
-
-LIBRARY: ImageAnalysisNative.dll
-Extern: int "C" IA_Version() ;
-: ia.require-version ( -- )
-    IA_Version 3 <> abort" ImageAnalysisNative.dll API 3 required"
-;
-ia.require-version
-
-Extern: void "C" IA_SetDebug( int enabled ) ;
-Extern: void "C" IA_DefaultConfig( int * config ) ;
-Extern: int "C" IA_WorkspaceBytes( int maximum_stars ) ;
-Extern: int "C" IA_AnalyzeFrame(
-    int * pixels, int frame_size_bytes,
-    int width, int height, int stride_pixels,
-    int * config, int * workspace, int workspace_bytes,
-    int * stars, int star_capacity, int * summary
-) ;
-Extern: int "C" IA_SummarizeStars(
-    int * stars, int star_count, int reject_flags,
-    int * workspace, int workspace_bytes, int * summary
-) ;
-Extern: int "C" IA_MeasureLockedStars(
-    int * pixels, int frame_size_bytes, int width, int height, int stride_pixels,
-    int * config, int * locked_stars, int star_count,
-    int search_radius_pixels, int * measurements
-) ;
-Extern: int "C" IA_RecommendExposure(
-    int current_milliseconds, int measured_peak_adu, int background_adu,
-    int target_peak_adu, int minimum_milliseconds, int maximum_milliseconds,
-    int maximum_change_milli, int * recommended_milliseconds
-) ;
-Extern: int "C" IA_ComputeStarROI(
-    int * stars, int star_count, int image_width, int image_height,
-    int margin_pixels, int * roi
-) ;
-Extern: int "C" IA_FocusRunBytes() ;
-Extern: void "C" IA_DefaultFocusConfig( int * config ) ;
-Extern: int "C" IA_BeginFocusRun(
-    int * run, int run_bytes, int * focus_config, int * analysis_config,
-    int * pixels, int frame_size_bytes,
-    int width, int height, int stride_pixels,
-    int center_focus_position, int exposure_milliseconds, int * request
-) ;
-Extern: int "C" IA_SubmitFocusFrame(
-    int * run, int * pixels, int frame_size_bytes, int width, int height, int stride_pixels,
-    int origin_x, int origin_y, int focus_position,
-    int exposure_milliseconds, int * request
-) ;
-Extern: int "C" IA_EndFocusRun(
-    int * run, int * result
-) ;
-Extern: int "C" IA_DiagnoseFocusFrame(
-    int * run, int * pixels, int frame_size_bytes, int width, int height, int stride_pixels,
-    int origin_x, int origin_y, int * diagnostic
-) ;
-
-0  constant IA.OK
--3 constant IA.NO_STARS
-
-1  constant IA.STAR.SATURATED
-2  constant IA.STAR.EDGE
-4  constant IA.STAR.BLENDED
-8  constant IA.STAR.TOO_SMALL
-16 constant IA.STAR.LOW_SNR
-
-BEGIN-STRUCTURE <IA_CONFIG>
-    4 +FIELD IA_CONFIG.struct_size
-    4 +FIELD IA_CONFIG.detection_sigma_milli
-    4 +FIELD IA_CONFIG.minimum_threshold_adu
-    4 +FIELD IA_CONFIG.saturation_adu
-    4 +FIELD IA_CONFIG.minimum_area_pixels
-    4 +FIELD IA_CONFIG.minimum_separation_pixels
-    4 +FIELD IA_CONFIG.aperture_radius_pixels
-    4 +FIELD IA_CONFIG.annulus_inner_radius_pixels
-    4 +FIELD IA_CONFIG.annulus_outer_radius_pixels
-    4 +FIELD IA_CONFIG.minimum_snr_milli
-    4 +FIELD IA_CONFIG.blend_minimum_contrast_milli
-END-STRUCTURE
-
-BEGIN-STRUCTURE <IA_STAR>
-    4 +FIELD IA_STAR.struct_size
-    4 +FIELD IA_STAR.x_milli
-    4 +FIELD IA_STAR.y_milli
-    4 +FIELD IA_STAR.flux_adu
-    4 +FIELD IA_STAR.peak_adu
-    4 +FIELD IA_STAR.saturated_pixels
-    4 +FIELD IA_STAR.background_milli_adu
-    4 +FIELD IA_STAR.noise_milli_adu
-    4 +FIELD IA_STAR.snr_milli
-    4 +FIELD IA_STAR.hfr_milli_pixels
-    4 +FIELD IA_STAR.hfd_milli_pixels
-    4 +FIELD IA_STAR.fwhm_milli_pixels
-    4 +FIELD IA_STAR.sigma_major_milli_pixels
-    4 +FIELD IA_STAR.sigma_minor_milli_pixels
-    4 +FIELD IA_STAR.ellipticity_milli
-    4 +FIELD IA_STAR.theta_millidegrees
-    4 +FIELD IA_STAR.positive_pixels
-    4 +FIELD IA_STAR.left
-    4 +FIELD IA_STAR.top
-    4 +FIELD IA_STAR.right
-    4 +FIELD IA_STAR.bottom
-    4 +FIELD IA_STAR.flags
-END-STRUCTURE
-
-BEGIN-STRUCTURE <IA_FRAME_SUMMARY>
-    4 +FIELD IA_FRAME_SUMMARY.struct_size
-    4 +FIELD IA_FRAME_SUMMARY.detected_stars
-    4 +FIELD IA_FRAME_SUMMARY.measured_stars
-    4 +FIELD IA_FRAME_SUMMARY.included_stars
-    4 +FIELD IA_FRAME_SUMMARY.saturated_stars
-    4 +FIELD IA_FRAME_SUMMARY.edge_stars
-    4 +FIELD IA_FRAME_SUMMARY.blended_stars
-    4 +FIELD IA_FRAME_SUMMARY.low_snr_stars
-    4 +FIELD IA_FRAME_SUMMARY.background_milli_adu
-    4 +FIELD IA_FRAME_SUMMARY.noise_milli_adu
-    4 +FIELD IA_FRAME_SUMMARY.detection_threshold_adu
-    4 +FIELD IA_FRAME_SUMMARY.median_hfd_milli_pixels
-    4 +FIELD IA_FRAME_SUMMARY.mad_hfd_milli_pixels
-    4 +FIELD IA_FRAME_SUMMARY.median_fwhm_milli_pixels
-    4 +FIELD IA_FRAME_SUMMARY.mad_fwhm_milli_pixels
-    4 +FIELD IA_FRAME_SUMMARY.median_ellipticity_milli
-    4 +FIELD IA_FRAME_SUMMARY.median_snr_milli
-END-STRUCTURE
-
-BEGIN-STRUCTURE <IA_RECT>
-    4 +FIELD IA_RECT.x
-    4 +FIELD IA_RECT.y
-    4 +FIELD IA_RECT.width
-    4 +FIELD IA_RECT.height
-END-STRUCTURE
-
-1 constant IA.FOCUS.CAPTURE
-2 constant IA.FOCUS.RETAKE
-3 constant IA.FOCUS.COMPLETE
-4 constant IA.FOCUS.FAILED
-
-1 constant IA.FOCUS.SATURATED
-2 constant IA.FOCUS.TOO_FAINT
-4 constant IA.FOCUS.NO_STARS
-8 constant IA.FOCUS.NO_CURVE
-
-BEGIN-STRUCTURE <IA_FOCUS_CONFIG>
-    4 +FIELD IA_FOCUS_CONFIG.struct_size
-    4 +FIELD IA_FOCUS_CONFIG.star_limit
-    4 +FIELD IA_FOCUS_CONFIG.point_count
-    4 +FIELD IA_FOCUS_CONFIG.focus_increment
-    4 +FIELD IA_FOCUS_CONFIG.target_minimum_peak_adu
-    4 +FIELD IA_FOCUS_CONFIG.target_maximum_peak_adu
-    4 +FIELD IA_FOCUS_CONFIG.minimum_exposure_ms
-    4 +FIELD IA_FOCUS_CONFIG.maximum_exposure_ms
-    4 +FIELD IA_FOCUS_CONFIG.initial_maximum_change_milli
-    4 +FIELD IA_FOCUS_CONFIG.step_maximum_change_milli
-    4 +FIELD IA_FOCUS_CONFIG.maximum_retries
-    4 +FIELD IA_FOCUS_CONFIG.roi_margin_pixels
-    4 +FIELD IA_FOCUS_CONFIG.search_radius_pixels
-    4 +FIELD IA_FOCUS_CONFIG.reject_star_flags
-    4 +FIELD IA_FOCUS_CONFIG.minimum_branch_points
-    4 +FIELD IA_FOCUS_CONFIG.maximum_residual_milli
-END-STRUCTURE
-
-BEGIN-STRUCTURE <IA_FOCUS_REQUEST>
-    4 +FIELD IA_FOCUS_REQUEST.struct_size
-    4 +FIELD IA_FOCUS_REQUEST.action
-    4 +FIELD IA_FOCUS_REQUEST.reason_flags
-    4 +FIELD IA_FOCUS_REQUEST.focus_position
-    4 +FIELD IA_FOCUS_REQUEST.exposure_milliseconds
-    4 +FIELD IA_FOCUS_REQUEST.roi_x
-    4 +FIELD IA_FOCUS_REQUEST.roi_y
-    4 +FIELD IA_FOCUS_REQUEST.roi_width
-    4 +FIELD IA_FOCUS_REQUEST.roi_height
-END-STRUCTURE
-
-BEGIN-STRUCTURE <IA_FOCUS_RESULT>
-    4 +FIELD IA_FOCUS_RESULT.struct_size
-    4 +FIELD IA_FOCUS_RESULT.stars_locked
-    4 +FIELD IA_FOCUS_RESULT.stars_fitted
-    4 +FIELD IA_FOCUS_RESULT.focus_milli_steps
-    4 +FIELD IA_FOCUS_RESULT.mad_focus_milli_steps
-    4 +FIELD IA_FOCUS_RESULT.median_rms_residual_milli
-    4 +FIELD IA_FOCUS_RESULT.recommended_exposure_milliseconds
-END-STRUCTURE
-
-BEGIN-STRUCTURE <IA_FOCUS_DIAGNOSTIC>
-    4 +FIELD IA_FOCUS_DIAGNOSTIC.struct_size
-    4 +FIELD IA_FOCUS_DIAGNOSTIC.stars_measured
-    4 +FIELD IA_FOCUS_DIAGNOSTIC.saturated_stars
-    4 +FIELD IA_FOCUS_DIAGNOSTIC.median_hfd_milli_pixels
-    4 +FIELD IA_FOCUS_DIAGNOSTIC.mad_hfd_milli_pixels
-END-STRUCTURE
-
-256 constant IA.MAX_STARS
-create ia.config <IA_CONFIG> allot
-create ia.summary <IA_FRAME_SUMMARY> allot
-IA.MAX_STARS IA_WorkspaceBytes constant ia.workspace.bytes
-ia.workspace.bytes allocate throw constant ia.workspace
-<IA_STAR> IA.MAX_STARS * allocate throw constant ia.stars
-
-IA.STAR.SATURATED IA.STAR.EDGE or
-IA.STAR.BLENDED or IA.STAR.TOO_SMALL or IA.STAR.LOW_SNR or
-value ia.reject-flags
-32 value ia.summary-stars
-
-ia.config IA_DefaultConfig
-
-: ia.debug-on  ( -- ) -1 IA_SetDebug ;
-: ia.debug-off ( -- )  0 IA_SetDebug ;
-
-: ia.star ( index -- star )
-    <IA_STAR> * ia.stars +
-;
-
-: ia.milli$ ( n -- caddr u )
-\ Format a signed value scaled by 1000 with exactly three decimal places.
-    dup >R abs 0 <# # # # '.' hold #s R> sign #>
-;
-
-: ia.summarize ( reject-flags -- status )
-    ia.stars
-    ia.summary IA_FRAME_SUMMARY.measured_stars @ ia.summary-stars min
-    rot
-    ia.workspace
-    ia.workspace.bytes
-    ia.summary
-    IA_SummarizeStars
-;
-
-: ia.measure-locked { img locked count search-radius results -- status }
-    img FRAME_BITMAP
-    img frame-capacity
-    img FRAME_WIDTH @
-    img FRAME_HEIGHT @
-    img FRAME_WIDTH @
-    ia.config
-    locked
-    count
-    search-radius
-    results
-    IA_MeasureLockedStars
-;
-
-variable ia.recommended-exposure
-
-: ia.recommend-exposure
-    { current-ms peak background target min-ms max-ms max-change-milli
-      -- recommended-ms status }
-    current-ms peak background target min-ms max-ms max-change-milli
-    ia.recommended-exposure
-    IA_RecommendExposure
-    ia.recommended-exposure @ swap
-;
-
-create ia.roi <IA_RECT> allot
-
-: ia.compute-roi
-    { stars count image-width image-height margin -- roi status }
-    stars count image-width image-height margin ia.roi
-    IA_ComputeStarROI
-    ia.roi swap
-;
-
-: ia.begin-focus
-    { run run-bytes focus-config img center-focus exposure-ms request
-      -- status }
-    <IA_FOCUS_REQUEST> request IA_FOCUS_REQUEST.struct_size !
-    run run-bytes focus-config ia.config
-    img FRAME_BITMAP
-    img frame-capacity
-    img FRAME_WIDTH @
-    img FRAME_HEIGHT @
-    img FRAME_WIDTH @
-    center-focus exposure-ms request
-    IA_BeginFocusRun
-;
-
-: ia.submit-focus
-    { run img origin-x origin-y focus exposure-ms request -- status }
-    <IA_FOCUS_REQUEST> request IA_FOCUS_REQUEST.struct_size !
-    run
-    img FRAME_BITMAP
-    img frame-capacity
-    img FRAME_WIDTH @
-    img FRAME_HEIGHT @
-    img FRAME_WIDTH @
-    origin-x origin-y focus exposure-ms request
-    IA_SubmitFocusFrame
-;
-
-: ia.end-focus { run result -- status }
-    <IA_FOCUS_RESULT> result IA_FOCUS_RESULT.struct_size !
-    run result IA_EndFocusRun
-;
-
-: ia.diagnose-focus
-    { run img origin-x origin-y diagnostic -- status }
-    <IA_FOCUS_DIAGNOSTIC>
-        diagnostic IA_FOCUS_DIAGNOSTIC.struct_size !
-    run
-    img FRAME_BITMAP
-    img frame-capacity
-    img FRAME_WIDTH @
-    img FRAME_HEIGHT @
-    img FRAME_WIDTH @
-    origin-x origin-y diagnostic
-    IA_DiagnoseFocusFrame
-;
-
-: ia.add-FITS { img | map -- }
-    img FRAME_METADATA @ -> map
-    s"  " map =>" #STARS"
-    ia.summary IA_FRAME_SUMMARY.detected_stars @ (.) map =>" NDETECT"
-    ia.summary IA_FRAME_SUMMARY.included_stars @ (.) map =>" NSTARS"
-    ia.summary IA_FRAME_SUMMARY.included_stars @ if
-        ia.summary IA_FRAME_SUMMARY.median_hfd_milli_pixels @
-            ia.milli$ map =>" HFD"
-        ia.summary IA_FRAME_SUMMARY.mad_hfd_milli_pixels @
-            ia.milli$ map =>" HFDMAD"
-        ia.summary IA_FRAME_SUMMARY.median_fwhm_milli_pixels @
-            ia.milli$ map =>" FWHM"
-        ia.summary IA_FRAME_SUMMARY.mad_fwhm_milli_pixels @
-            ia.milli$ map =>" FWHMMAD"
-        ia.summary IA_FRAME_SUMMARY.median_ellipticity_milli @
-            ia.milli$ map =>" ELLIP"
-        ia.summary IA_FRAME_SUMMARY.median_snr_milli @
-            ia.milli$ map =>" STARSNR"
-    then
-    ia.summary IA_FRAME_SUMMARY.background_milli_adu @
-        ia.milli$ map =>" BKG"
-    ia.summary IA_FRAME_SUMMARY.noise_milli_adu @
-        ia.milli$ map =>" BKGNOIS"
-;
-
-: compute-starStats { img | status -- status }
-\ Analyze the current in-memory 16-bit frame; Forth owns rejection policy.
-    <IA_FRAME_SUMMARY> ia.summary IA_FRAME_SUMMARY.struct_size !
-    img FRAME_BITMAP
-    img frame-capacity
-    img FRAME_WIDTH @
-    img FRAME_HEIGHT @
-    img FRAME_WIDTH @
-    ia.config
-    ia.workspace
-    ia.workspace.bytes
-    ia.stars
-    IA.MAX_STARS
-    ia.summary
-    IA_AnalyzeFrame -> status
-    status IA.OK = if
-        ia.reject-flags ia.summarize drop
-    then
-    img ia.add-FITS
-    status
-;
 
 BEGIN-STRUCTURE <FRAME_STATISTICS>
     0x40000 +FIELD HISTOGRAM                        \ one 32 bit cell for each 16 bit brightness value
@@ -366,13 +10,13 @@ BEGIN-STRUCTURE <FRAME_STATISTICS>
           4 +FIELD MEDIAN
           4 +FIELD MEDIAN_ABSOLUTE_DEVIATION
           4 +FIELD df.B                             \ display function parameters
-          4 +FIELD df.C 
+          4 +FIELD df.C
           4 +FIELD df.MADN
           4 +FIELD df.a
           4 +FIELD df.t
           4 +FIELD df.s
           4 +FIELD df.h
-          4 +FIELD df.m          
+          4 +FIELD df.m
 END-STRUCTURE
 
 : allocate-frameStats ( -- imageStats)
@@ -383,7 +27,7 @@ END-STRUCTURE
 
 CODE <histogram> ( bitmap histogram total_pixels  -- )
     mov     edx, 4 [ebp]            \ source pointer
-    mov     ecx, 0 [ebp]            \ histogram pointer    
+    mov     ecx, 0 [ebp]            \ histogram pointer
     test    ebx, ebx                \ exit if no pixels to process
     jz      L$2
 L$1:
@@ -395,7 +39,7 @@ L$1:
 L$2:
     mov ebx, 08 [ebp]               \ move the 2nd stack item to the cached TOS
     lea ebp, 12 [ebp]               \ move the stack pointer up by 3 cells
-    NEXT,    
+    NEXT,
 END-CODE
 
 CODE <histogram-ad> ( median bitmap histogram total_pixels  -- )
@@ -403,7 +47,7 @@ CODE <histogram-ad> ( median bitmap histogram total_pixels  -- )
     push    esi                     \ callee save
     mov     edi, 8 [ebp]            \ median pixel value
     mov     esi, 4 [ebp]            \ address of the image array (free EDX for CDQ)
-    mov     ecx, 0 [ebp]            \ pointer to the base of the histogram buffer   
+    mov     ecx, 0 [ebp]            \ pointer to the base of the histogram buffer
     test    ebx, ebx                \ exit if no pixels to process
     jz      L$2
 L$1:
@@ -421,7 +65,7 @@ L$2:
     pop edi                         \ callee restore
     mov ebx, 12 [ebp]               \ move the 3rd stack item to the cached TOS
     lea ebp, 16 [ebp]               \ move the stack pointer up by 4 cells
-    NEXT,    
+    NEXT,
 END-CODE
 
 CODE <median> ( histogram total_pixels -- m )
@@ -434,12 +78,12 @@ L$1:
     inc     edx                     \ advance to the next bin
     add     ecx, 4                  \ advance to the address of the next bin
     cmp     edx, 0x10000            \ test if edx < 0x10000, i.e. there are still bins remaining
-    jb      L$1           
+    jb      L$1
     or      edx, -1                 \ set edx=-1 as the return value since the target number of pixels was not reached
-L$2:   
+L$2:
     mov     ebx, edx                \ return the median on TOS
     lea     ebp, 4 [ebp]            \ move the stack pointer up by 1 cells
-    NEXT,     
+    NEXT,
 END-CODE
 
 CODE <mean> ( histogram total_pixels -- m )
@@ -459,29 +103,29 @@ L$1:
     inc     ecx                     \ advance to the next bin
     add     ebx, 4                  \ advance to the address of the next bin
     cmp     ecx, 0x10000            \ test if ecx < 0x10000, i.e. there are still bins remaining
-    jb      L$1             
+    jb      L$1
     mov     edx, esi                \ move the accumulated pixel intensity to edx:eax
     mov     eax, edi
     pop     ebx                     \ reload ebx with the number of pixels
     div     ebx                     \ after the division eax contains the mean pixel value
     mov     ebx, eax                \ return the mean on TOS
-    lea     ebp, 4 [ebp]            \ move the stack pointer up by 1 cells  
-    pop     edi                     \ callee restore    
-    pop     esi                     \ callee restore    
-    NEXT,     
+    lea     ebp, 4 [ebp]            \ move the stack pointer up by 1 cells
+    pop     edi                     \ callee restore
+    pop     esi                     \ callee restore
+    NEXT,
 END-CODE
 
 : compute-histogram { image | imageStats -- }
-\ prepare a full-resolution histogram for an image 
+\ prepare a full-resolution histogram for an image
     image FRAME_STATISTICS @ -> imageStats
     image FRAME_BITMAP
 	imageStats HISTOGRAM dup 0x40000 erase
 	image FRAME_SIZE_BYTES @ 2/ dup imageStats TOTAL_PIXELS !       \ each pixel is 2 bytes
-    ( bitmap histogram n ) <histogram> 
+    ( bitmap histogram n ) <histogram>
 ;
 
 : compute-ASBDhistogram { image | imageStats -- }
-\ prepare a full-resolution histogram of the absolute deviation values of image 
+\ prepare a full-resolution histogram of the absolute deviation values of image
     image FRAME_STATISTICS @ -> imageStats
     imageStats MEDIAN @
     image FRAME_BITMAP
@@ -489,7 +133,7 @@ END-CODE
  	imageStats TOTAL_PIXELS @
  	( median bitmap histogram n) <histogram-ad>
 ;
-    
+
 : compute-median ( imageStats -- )
 \ compute the median and update imageStats
     >R R@ HISTOGRAM R@ TOTAL_PIXELS @ <median>
@@ -498,7 +142,7 @@ END-CODE
 
 : compute-median_absolute_deviation ( imageStats -- )
 \ compute the mediam absolute deviation and update imageStats
-    >R R@ HISTOGRAM_ABSOLUTE_DEVIATION R@ TOTAL_PIXELS @ <median> 
+    >R R@ HISTOGRAM_ABSOLUTE_DEVIATION R@ TOTAL_PIXELS @ <median>
     R> MEDIAN_ABSOLUTE_DEVIATION !
 ;
 
@@ -517,7 +161,7 @@ END-CODE
 \ add key value pairs for FITS observation parameters
     image FRAME_STATISTICS @ -> imageStats
     image FRAME_METADATA @ -> map
-	s"  "                                       map =>" #STATS"         \ a header to indicate the source of these FITS values	
+	s"  "                                       map =>" #STATS"         \ a header to indicate the source of these FITS values
     imageStats MEAN @ (.)                       map =>" MEAN"
     imageStats MEDIAN @ (.)                     map =>" MEDIAN"
     imageStats MEDIAN_ABSOLUTE_DEVIATION @ (.)  map =>" MEDIANAD"
@@ -528,17 +172,16 @@ END-CODE
     image FRAME_STATISTICS @ ?dup if free throw then
     0 image FRAME_STATISTICS !
     allocate-frameStats dup -> imageStats image FRAME_STATISTICS !
-    image compute-histogram 
-    imageStats compute-mean 
+    image compute-histogram
+    imageStats compute-mean
     imageStats compute-median
     image compute-ASBDhistogram              \ must compute the median first
     imagestats compute-median_absolute_deviation
     image add-ImageAnalysisFITS
-    image compute-starStats drop
 ;
 
 : combine-images { n x y addr0 | half-n size dest -- }	\ VFX locals
-\ combine n sequential x * y * 16bit monochrome images at located at addr0  
+\ combine n sequential x * y * 16bit monochrome images at located at addr0
 \ space for the combines image must already be allocated at the end of the set of images
 	n 2/ -> half-n					\ for rounding
 	x y * 2* -> size				\ size in bytes of each image
@@ -546,7 +189,7 @@ END-CODE
 	size 0 DO
 			0 							\ cumulative count across bins
 			n 0 DO
-				addr0 i size * + j + w@ 
+				addr0 i size * + j + w@
 				+						\ update the cumulative
 			LOOP
 			half-n + n /			\ adding half-n rounds rather than truncates using integer arithmetic
@@ -559,10 +202,10 @@ END-CODE
 : .imageStats ( image --)
     FRAME_STATISTICS @
     cr ." Mean      " dup mean ?
-    cr ." Median    " dup median ? 
+    cr ." Median    " dup median ?
     cr ." MedianAD  " dup median_absolute_deviation ?
-    cr ." DF B      " dup df.B ?                             
-    cr ." DF C      " dup df.C ? 
+    cr ." DF B      " dup df.B ?
+    cr ." DF C      " dup df.C ?
     cr ." DF MADN   " dup df.MADN ?
     cr ." DF a      " dup df.a ?
     cr ." DF t      " dup df.t ?

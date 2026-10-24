@@ -51,6 +51,7 @@ image make-constant
 image compute-imageStats
 
 Tstart
+T{ [defined] AnalyzeStars }T 0 ==
 T{ image FRAME_STATISTICS @ TOTAL_PIXELS @ }T 640 480 * ==
 T{ image FRAME_STATISTICS @ MEAN @ }T 32768 ==
 T{ image FRAME_STATISTICS @ MEDIAN @ }T 32768 ==

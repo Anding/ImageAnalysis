@@ -1,5 +1,9 @@
 ## Next steps for ImageAnalysis
 
+The native package now provides only stateless star records. The items below
+are future work, not functionality supplied by the current DLL; the old
+combined analysis/autofocus API has been removed.
+
 1. Calibrate the saved L-filter piecewise-V and hyperbolic models from clear
    multi-star brackets and retain both until repeated nights distinguish them.
 

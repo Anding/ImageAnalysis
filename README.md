@@ -1,71 +1,76 @@
 # ImageAnalysis
-Astronomical image analysis in Forth
 
-`compute-imageStats` builds the full 16-bit histogram and publishes integer
-`MEAN`, `MEDIAN`, `MEDIANAD`, and `SATPIX` values into the frame's ordered
-FITS metadata map. `SATPIX` is the exact number of pixels in histogram bin
-65535; a saturation fraction remains derivable from the image dimensions.
+`ImageAnalysis.f` contains the Forth histogram, pixel-statistics and image
+combination code. `compute-imageStats` writes only the existing pixel FITS
+keywords `MEAN`, `MEDIAN`, `MEDIANAD` and `SATPIX` (plus their section marker).
+It does not invoke star analysis.
 
-## Native star analysis
+`StarAnalysis.f` is the separate native star-analysis binding and caller:
 
-`native\image_analysis.c` builds as the 32-bit `ImageAnalysisNative.dll` used
-by VFX Forth. It operates directly on an in-memory unsigned 16-bit frame; the
-caller supplies the allocation capacity and native analysis rejects a geometry
-that would read beyond it. File loading, acquisition policy, and hardware
-control remain in Forth.
+```forth
+need StarAnalysis
+image analyze-stars
+image FRAME_STARS @  \ Address of the headerless, zero-terminated StarRecord list.
+```
 
-API version 3 requires byte capacity on every bitmap-taking entry point,
-including locked-star measurement, focus submission and diagnostics. The check
-includes row stride and runs before reading pixels. Forth refuses a different
-DLL API version at load time; deploy the rebuilt DLL with its matching binding.
+`analyze-stars` builds the frame's histogram, allocating pixel-statistics
+storage if needed, and replaces its star list. It writes **no FITS metadata**.
+See `StarAnalysis_test1.f` for an executable synthetic-frame tutorial.
+`DisplayFunction.f` remains the histogram-based display stretch.
 
-The native API:
+## Native contract
 
-- estimates a global median/MAD background;
-- detects and measures stars;
-- returns fixed-point per-star and frame statistics;
-- summarizes any Forth-selected subset using a caller-supplied flag mask;
-- runs stateful bitmap-driven autofocus with compact star selection,
-  adaptive exposure, and intersecting-line fits;
-- remeasures locked stars without changing their identities;
-- robustly combines independently fitted stellar focus positions;
-- returns an optional aggregate HFD diagnostic at the accepted focus.
+`AnalyzeStars(pixels, width, height, histogram, stars)` receives only a
+contiguous unsigned 16-bit bitmap, its logical dimensions, a matching
+65,536-bin `uint32_t` histogram, and the output address. It returns the number
+of stars, or a negative error (`-1` invalid input, `-2` allocation failure).
+The histogram supplies the upper median background; there is no local
+background estimation, SNR, frame summary, equipment context or run state.
 
-The completed autofocus result reuses the exact exposure from the successful
-discovery or sweep frame nearest the fitted focus, preferring the latest on
-equal distances. Frames with rejected, saturated, or low-SNR locked-star
-measurements are excluded; sweep exposure adaptation is unchanged.
+Detection uses eight-connected pixels **greater than median + 16 ADU**, at
+least three pixels per component. Each component supplies one candidate;
+there is no deblending or brightness ranking. A positive-flux centroid
+refinement sets the circular 16-pixel measurement aperture. Candidates whose
+aperture crosses an image edge are omitted. Nearby candidates can contaminate
+each other's apertures; these initial rules do not classify blends.
 
-All arrays and workspaces are caller-owned. Metric values use milli-units so
-the ABI contains only 32-bit fields and is directly accessible from 32-bit
-VFX Forth. HFD is twice HFR. `FWHM` is the Gaussian-equivalent width derived
-from second moments and is identified as such because defocused stars need
-not have Gaussian profiles.
+Return at most **256 stars**, in component discovery order (row-major scan),
+then a zero record. Reaching 256 is normal completion. The caller always
+provides **257 records**, including the terminator; there is no buffer header
+or capacity argument. Scratch storage is private to each call and freed before
+return. On error the list starts with a zero record.
 
-Signal-to-noise uses signed background-subtracted aperture flux and all
-aperture pixels. HFD still uses positive flux as defined above. Do not reuse
-that rectified flux for SNR: noise-only apertures then appear significant and
-can masquerade as surviving locked stars. The synthetic locked-noise
-regression protects this distinction.
+The 72-byte, eight-byte-aligned `StarRecord` layout is declared in
+`native\image_analysis.h` and in `ForthAstroFormats\Frame.f`:
 
-Autofocus updates a locked search center only from an accepted measurement.
-Rejected/noise centroids must not walk a pending retake away from the star's
-last valid position. A transient-loss/return regression protects recovery.
+| Offset | Field | Representation |
+| --- | --- | --- |
+| 0 | `positive_pixel_count` | `uint32_t`; zero terminates the list |
+| 4 | `saturated_pixel_count` | `uint32_t`; raw samples equal to 65535 |
+| 8, 16 | `x`, `y` | `double`; positive-flux centroid, zero-based bitmap pixel centres |
+| 24 | `flux` | `double`; sum of positive background-subtracted ADU |
+| 32 | `hfd` | `double`; half-flux diameter in bitmap pixels |
+| 40, 48, 56 | `qxx`, `qyy`, `qxy` | `double`; positive-flux central second moments in pixels squared |
+| 64 | `max_pixel` | `uint16_t`; maximum raw aperture sample; six tail-padding bytes |
 
-Overlapping locked searches can land on the same peak. A shared centroid
-retains the first identity and flags subsequent identities as blended using
-the supplied minimum separation, preventing duplicate stellar fit votes.
+Use `DF@` for C doubles in VFX Forth, **not `F@`** (80-bit extended).
+Qxx=Qyy alone does not imply roundness: Qxy must also vanish. HFD comes from
+positive pixel flux accumulated in 1/16-pixel radial bins about the returned
+centroid, with linear interpolation in the half-flux bin, not from Q.
+The flux centroid and central moments describe the pixels selected by the
+refined aperture; the centroid can move slightly as its boundary changes.
 
-Build `ImageAnalysis_project\ImageAnalysis_project.vcxproj` for
-`Release|Win32`. `native\test_image_analysis.c` contains dependency-free
-synthetic tests for detection, measurement, exposure calculation, and ROI
-calculation. Native autofocus receives in-memory bitmaps only; it contains no
-image-file loader.
+Every frame always allocates its own initially empty star list and frees it
+with `free-frame`. `FRAME_STARS` never refers to shared native result memory;
+a later analysis of another frame does not overwrite it. ROI dimensions do
+not change the frame's bitmap allocation capacity or its star-list allocation.
 
-Native diagnostics are independent of Forth logging and are off by default.
-`IA_SetDebug(1)` (or `ia.debug-on`) appends immediately flushed calculation
-checkpoints to `E:\images\logs\image-analysis-native.log`;
-`IA_SetDebug(0)` (or `ia.debug-off`) disables them.
-Locked-star result checkpoints include SNR, local background/noise and
-positive-aperture flux/area, so unexpectedly large faint-star HFD can be
-investigated without changing acquisition or final-diagnostic exposure policy.
+Build `ImageAnalysis_project\ImageAnalysis_project.vcxproj` as `Release|Win32`
+and deploy `ImageAnalysisNative.dll` to MPE's Bin directory. Compile
+`native\image_analysis.c` with `native\test_image_analysis.c` to run the
+dependency-free numerical regression.
+
+This is a replacement API, not an adapter. The previous `IA_*` analysis and
+autofocus exports are removed. The legacy application autofocus script is no
+longer automatically loaded. A separate stateful curve modeller and its
+Forth autofocus orchestration are not implemented here.
