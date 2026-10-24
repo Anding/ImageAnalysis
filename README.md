@@ -1,5 +1,11 @@
 # ImageAnalysis
 
+`NEED ImageAnalysis` loads `Library.f`, which composes the pixel/statistics
+and display-function sources. It depends on Formats, not on the application.
+`NEED FocusCurve` independently loads the stateful curve ABI in `FocusCurve.f`.
+`NEED StarAnalysis` loads the stateless star binding and retains access to the
+curve vocabulary for existing callers; the declarations have separate owners.
+
 `ImageAnalysis.f` contains the Forth histogram, pixel-statistics and image
 combination code. `compute-imageStats` writes only the existing pixel FITS
 keywords `MEAN`, `MEDIAN`, `MEDIANAD` and `SATPIX` (plus their section marker).
