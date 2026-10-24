@@ -1,5 +1,6 @@
 \ Stateless native star analysis; records and storage belong to the frame.
 need ImageAnalysis
+need ForthVT100
 
 LIBRARY: ImageAnalysisNative.dll
 Extern: int "C" AnalyzeStars(
@@ -8,15 +9,12 @@ Extern: int "C" AnalyzeStars(
 
 : analyze-stars { frame -- }
 \ Replace FRAME_STARS with up to 256 records and a zero terminator; no FITS.
-\ Prepare this frame's histogram independently of other pipeline requests.
-    frame FRAME_STATISTICS @ 0= if
-        allocate-frameStats frame FRAME_STATISTICS !
-    then
-    frame compute-histogram
+\ Caller must have prepared the histogram; both buffers belong to the frame.
     frame FRAME_BITMAP
     frame FRAME_WIDTH @
     frame FRAME_HEIGHT @
     frame FRAME_STATISTICS @ HISTOGRAM
     frame FRAME_STARS @
-    AnalyzeStars dup 0< abort" Native star analysis failed" drop
+    AnalyzeStars 0< IF s" Native star analysis failed" .E> THEN
+    \ A negative result leaves an empty list; log the failure and continue.
 ;

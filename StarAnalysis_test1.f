@@ -5,6 +5,7 @@ need simple-tester
 64 64 1 allocate-frame constant stars.test.frame
 64 64 1 allocate-frame constant stars.test.other
 stars.test.frame FRAME_STARS @ constant stars.test.list
+stars.test.frame FRAME_STATISTICS @ constant stars.test.stats
 
 : stars.test.background { frame -- }
 \ Fill a frame with a constant 1000-ADU sky.
@@ -34,6 +35,7 @@ stars.test.frame stars.test.background
 stars.test.triangle
 \ Pixel statistics alone must not invoke star analysis.
 stars.test.frame compute-imageStats
+T{ stars.test.frame FRAME_STATISTICS @ }T stars.test.stats ==
 T{ stars.test.list star.positive-pixel-count @ }T 0 ==
 T{ stars.test.frame analyze-stars }T ==
 T{ stars.test.frame FRAME_STARS @ }T stars.test.list ==
@@ -53,18 +55,27 @@ T{ stars.test.frame FRAME_METADATA @ map-count }T 5 ==
 T{ s" NSTARS" stars.test.frame FRAME_METADATA @ map@ }T 0 0 ==
 T{ s" HFD" stars.test.frame FRAME_METADATA @ map@ }T 0 0 ==
 
-\ The caller prepares a histogram even without compute-imageStats.
+\ Prepare only the histogram explicitly when pixel FITS statistics are unwanted.
 stars.test.other stars.test.background
+stars.test.other compute-histogram
 T{ stars.test.other analyze-stars }T ==
 T{ stars.test.other FRAME_METADATA @ map-count }T 0 ==
 T{ stars.test.other FRAME_STARS @ star.positive-pixel-count @ }T 0 ==
 T{ stars.test.list star.positive-pixel-count @ }T 3 ==
 
 65535 33 32 stars.test.pixel
+stars.test.frame compute-histogram
 stars.test.frame analyze-stars
 T{ stars.test.list star.max-pixel w@ }T 65535 ==
 T{ stars.test.list star.saturated-pixel-count @ }T 1 ==
+\ A native failure empties the list and returns without aborting the run.
+0 stars.test.frame FRAME_WIDTH !
+T{ stars.test.frame analyze-stars }T ==
+T{ stars.test.list star.positive-pixel-count @ }T 0 ==
+64 stars.test.frame FRAME_WIDTH !
 stars.test.frame stars.test.background
+stars.test.frame compute-imageStats
+T{ stars.test.frame FRAME_STATISTICS @ }T stars.test.stats ==
 stars.test.frame analyze-stars
 T{ stars.test.list star.positive-pixel-count @ }T 0 ==
 T{ stars.test.frame free-frame stars.test.other free-frame }T ==

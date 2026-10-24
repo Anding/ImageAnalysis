@@ -9,12 +9,16 @@ It does not invoke star analysis.
 
 ```forth
 need StarAnalysis
+image compute-imageStats
 image analyze-stars
 image FRAME_STARS @  \ Address of the headerless, zero-terminated StarRecord list.
 ```
 
-`analyze-stars` builds the frame's histogram, allocating pixel-statistics
-storage if needed, and replaces its star list. It writes **no FITS metadata**.
+`analyze-stars` uses the histogram already prepared by the earlier image
+analysis stage and replaces its star list. The caller owns consistent stage
+selection; star analysis neither recomputes the histogram nor checks other
+stage bits. It allocates no result/statistics storage and writes **no FITS
+metadata**. Native failures leave an empty list and are logged without aborting.
 See `StarAnalysis_test1.f` for an executable synthetic-frame tutorial.
 `DisplayFunction.f` remains the histogram-based display stretch.
 
@@ -60,8 +64,10 @@ centroid, with linear interpolation in the half-flux bin, not from Q.
 The flux centroid and central moments describe the pixels selected by the
 refined aperture; the centroid can move slightly as its boundary changes.
 
-Every frame always allocates its own initially empty star list and frees it
-with `free-frame`. `FRAME_STARS` never refers to shared native result memory;
+Every frame always allocates its own zeroed statistics block and initially
+empty star list, and frees both with `free-frame`. `compute-imageStats` reuses
+that statistics block rather than reallocating it.
+`FRAME_STARS` never refers to shared native result memory;
 a later analysis of another frame does not overwrite it. ROI dimensions do
 not change the frame's bitmap allocation capacity or its star-list allocation.
 

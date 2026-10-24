@@ -2,27 +2,6 @@
 need ForthAstroFormats
 need ordered-maps
 
-BEGIN-STRUCTURE <FRAME_STATISTICS>
-    0x40000 +FIELD HISTOGRAM                        \ one 32 bit cell for each 16 bit brightness value
-    0x40000 +FIELD HISTOGRAM_ABSOLUTE_DEVIATION     \ histogram of the absolute deviations of the pixels from the median
-          4 +FIELD TOTAL_PIXELS
-          4 +FIELD MEAN
-          4 +FIELD MEDIAN
-          4 +FIELD MEDIAN_ABSOLUTE_DEVIATION
-          4 +FIELD df.B                             \ display function parameters
-          4 +FIELD df.C
-          4 +FIELD df.MADN
-          4 +FIELD df.a
-          4 +FIELD df.t
-          4 +FIELD df.s
-          4 +FIELD df.h
-          4 +FIELD df.m
-END-STRUCTURE
-
-: allocate-frameStats ( -- imageStats)
-    <FRAME_STATISTICS> allocate abort" unable to allocate image statistics"
-;
-
 \ internal words in assembly language
 
 CODE <histogram> ( bitmap histogram total_pixels  -- )
@@ -169,9 +148,7 @@ END-CODE
 ;
 
 : compute-imageStats { image | imageStats }
-    image FRAME_STATISTICS @ ?dup if free throw then
-    0 image FRAME_STATISTICS !
-    allocate-frameStats dup -> imageStats image FRAME_STATISTICS !
+    image FRAME_STATISTICS @ -> imageStats
     image compute-histogram
     imageStats compute-mean
     imageStats compute-median
