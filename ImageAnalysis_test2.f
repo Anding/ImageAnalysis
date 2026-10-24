@@ -5,8 +5,6 @@
 need ImageAnalysis
 need simple-tester
 
-0 shared value image
-
 : make-testXISF { | map img -- img }
     640 480 1 allocate-frame -> img
     img FRAME_METADATA @ -> map
@@ -43,20 +41,20 @@ need simple-tester
     R> drop
 ;   
 
-make-testXISF -> image
+make-testXISF constant stats.test-frame
 
-image compute-imageStats
+stats.test-frame compute-imageStats
 
-image make-constant
-image compute-imageStats
+stats.test-frame make-constant
+stats.test-frame compute-imageStats
 
 Tstart
 T{ [defined] AnalyzeStars }T 0 ==
-T{ image FRAME_STATISTICS @ TOTAL_PIXELS @ }T 640 480 * ==
-T{ image FRAME_STATISTICS @ MEAN @ }T 32768 ==
-T{ image FRAME_STATISTICS @ MEDIAN @ }T 32768 ==
-T{ image FRAME_STATISTICS @ histogram.saturated }T 1 ==
-T{ s" SATPIX" image FRAME_METADATA @ map@ hashS }T s" 1" hashS ==
+T{ stats.test-frame FRAME_STATISTICS @ TOTAL_PIXELS @ }T 640 480 * ==
+T{ stats.test-frame FRAME_STATISTICS @ MEAN @ }T 32768 ==
+T{ stats.test-frame FRAME_STATISTICS @ MEDIAN @ }T 32768 ==
+T{ stats.test-frame FRAME_STATISTICS @ histogram.saturated }T 1 ==
+T{ s" SATPIX" stats.test-frame FRAME_METADATA @ map@ hashS }T s" 1" hashS ==
 Tend
 
-image free-frame
+stats.test-frame free-frame

@@ -11,13 +11,14 @@ combination code. `compute-imageStats` writes only the existing pixel FITS
 keywords `MEAN`, `MEDIAN`, `MEDIANAD` and `SATPIX` (plus their section marker).
 It does not invoke star analysis.
 
-`StarAnalysis.f` is the separate native star-analysis binding and caller:
+`StarAnalysis.f` is the separate native star-analysis binding and caller.
+Pass a caller-owned `frame` explicitly; no global `image` is defined:
 
 ```forth
 need StarAnalysis
-image compute-imageStats
-image 10 analyze-stars
-image FRAME_STARS @  \ Address of the headerless, zero-terminated StarRecord list.
+frame compute-imageStats
+frame 10 analyze-stars
+frame FRAME_STARS @  \ Address of the headerless, zero-terminated StarRecord list.
 ```
 
 `analyze-stars ( frame max_stars -- )` reads `MEDIAN` from the frame metadata,
