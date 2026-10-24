@@ -101,7 +101,8 @@ dependency-free numerical regression.
 
 ## Independent native focus curve
 
-The same DLL exports the C-only API in `native\focus_curve.h`:
+The same DLL exports the API in `native\focus_curve.h`, bound directly by
+`StarAnalysis.f`:
 
 ```c
 int start_computation(uint32_t max_stars);
@@ -150,7 +151,9 @@ returns -1 and leaves both outputs unchanged.
 The curve module consumes only star records: it never invokes bitmap analysis,
 controls equipment, writes FITS metadata or decides whether to apply focus.
 Compile `native\focus_curve.c` with `native\test_focus_curve.c` alone for its
-synthetic regression. No Forth curve binding or autofocus script is supplied yet.
+synthetic regression. `AstroImagingInForth\capabilities\Autofocus.f` is the
+Forth caller: acquire through the existing pipeline, submit `FRAME_STARS`,
+retry exposure at the same position, and finish/apply or restore prior focus.
 
 This is a replacement API, not an adapter. The previous `IA_*` analysis and
 autofocus exports are removed. The legacy application autofocus script is no
