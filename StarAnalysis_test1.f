@@ -2,6 +2,8 @@
 need StarAnalysis
 need simple-tester
 
+starAnalysis.star-limit constant stars.test.saved-limit
+10 -> starAnalysis.star-limit
 64 64 1 allocate-frame constant stars.test.frame
 64 64 1 allocate-frame constant stars.test.other
 stars.test.frame FRAME_STARS @ constant stars.test.list
@@ -37,7 +39,7 @@ stars.test.triangle
 stars.test.frame compute-imageStats
 T{ stars.test.frame FRAME_STATISTICS @ }T stars.test.stats ==
 T{ stars.test.list star.positive-pixel-count @ }T 0 ==
-T{ stars.test.frame 10 analyze-stars }T ==
+T{ stars.test.frame analyze-stars }T ==
 T{ stars.test.frame FRAME_STARS @ }T stars.test.list ==
 T{ stars.test.list star.positive-pixel-count @ }T 3 ==
 T{ stars.test.list StarRecord + star.positive-pixel-count @ }T 0 ==
@@ -70,40 +72,44 @@ s" 4294968296" stars.test.other FRAME_METADATA @ =>" MEDIAN"
 T{ stars.test.other star-background }T 0 ==
 s" 1000" stars.test.other FRAME_METADATA @ =>" MEDIAN"
 T{ stars.test.other star-background }T 1000 ==
-T{ stars.test.other 10 analyze-stars }T ==
+T{ stars.test.other analyze-stars }T ==
 T{ stars.test.other FRAME_METADATA @ map-count }T 1 ==
 T{ stars.test.other FRAME_STARS @ star.positive-pixel-count @ }T 0 ==
 T{ stars.test.list star.positive-pixel-count @ }T 3 ==
 
 65535 33 32 stars.test.pixel
-stars.test.frame 10 analyze-stars
+stars.test.frame analyze-stars
 T{ stars.test.list star.max-pixel w@ }T 65535 ==
 T{ stars.test.list star.saturated-pixel-count @ }T 1 ==
 \ A native failure empties the list and returns without aborting the run.
 0 stars.test.frame FRAME_WIDTH !
-T{ stars.test.frame 10 analyze-stars }T ==
+T{ stars.test.frame analyze-stars }T ==
 T{ stars.test.list star.positive-pixel-count @ }T 0 ==
 64 stars.test.frame FRAME_WIDTH !
 stars.test.frame stars.test.background
 stars.test.frame compute-imageStats
 T{ stars.test.frame FRAME_STATISTICS @ }T stars.test.stats ==
-stars.test.frame 10 analyze-stars
+stars.test.frame analyze-stars
 T{ stars.test.list star.positive-pixel-count @ }T 0 ==
-\ The explicit per-call limit selects the brightest candidate, not the first scanned.
+\ Changing the analysis setting selects the brightest candidates on the next call.
 1100 18 18 stars.test.pixel
 1200 19 18 stars.test.pixel
 1100 18 19 stars.test.pixel
 2100 45 45 stars.test.pixel
 3200 46 45 stars.test.pixel
 2100 45 46 stars.test.pixel
-T{ stars.test.frame 1 analyze-stars }T ==
+1 -> starAnalysis.star-limit
+T{ stars.test.frame analyze-stars }T ==
 T{ stars.test.list star.x df@ f>s }T 45 ==
 T{ stars.test.list StarRecord + star.positive-pixel-count @ }T 0 ==
-T{ stars.test.frame 2 analyze-stars }T ==
+2 -> starAnalysis.star-limit
+T{ stars.test.frame analyze-stars }T ==
 T{ stars.test.list star.x df@ f>s }T 45 ==
 T{ stars.test.list StarRecord + star.x df@ f>s }T 18 ==
 T{ stars.test.list StarRecord 2* + star.positive-pixel-count @ }T 0 ==
-T{ stars.test.frame 0 analyze-stars }T ==
+0 -> starAnalysis.star-limit
+T{ stars.test.frame analyze-stars }T ==
 T{ stars.test.list star.positive-pixel-count @ }T 0 ==
 T{ stars.test.frame free-frame stars.test.other free-frame }T ==
+stars.test.saved-limit -> starAnalysis.star-limit
 Tend

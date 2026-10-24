@@ -17,11 +17,11 @@ Pass a caller-owned `frame` explicitly; no global `image` is defined:
 ```forth
 need StarAnalysis
 frame compute-imageStats
-frame 10 analyze-stars
+frame analyze-stars
 frame FRAME_STARS @  \ Address of the headerless, zero-terminated StarRecord list.
 ```
 
-`analyze-stars ( frame max_stars -- )` reads `MEDIAN` from the frame metadata,
+`analyze-stars ( frame -- )` reads `MEDIAN` from the frame metadata,
 converts it to an unsigned 16-bit integer, and supplies that background to C.
 Missing, malformed or out-of-range metadata supplies zero. It neither passes
 nor scans the histogram. The caller owns consistent stage selection.
@@ -35,9 +35,10 @@ See `StarAnalysis_test1.f` for an executable synthetic-frame tutorial.
 `AnalyzeStars(pixels, width, height, background, max_stars, stars)` receives a
 contiguous unsigned 16-bit bitmap, its logical dimensions, the already
 calculated background in ADU, a per-call measurement limit, and the output
-address. The application owns `starAnalysis.default.maxStars` (environment
-value 10). `expose` reads it and passes it through `<expose>` and
-`pipeline-process` to `analyze-stars`; explicit callers supply their own limit.
+address. `StarAnalysis.f` defines `starAnalysis.star-limit` with default 10.
+Callers can change it directly; `analyze-stars` reads its current value and
+passes it to C. Temporary overrides are saved/restored by their callers.
+Neither `<expose>` nor `pipeline-process` takes an analysis-limit argument.
 C stores no configured limit.
 `max_stars` accepts 0..256; zero returns an empty list. It returns the number
 of measured stars, or a negative error (`-1` invalid input, including a limit
