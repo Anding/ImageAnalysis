@@ -129,9 +129,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\native\image_analysis.h" />
+    <ClInclude Include="..\native\focus_curve.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\native\image_analysis.c" />
+    <ClCompile Include="..\native\focus_curve.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".github\copilot-instructions.md" />

@@ -65,7 +65,7 @@ or separate capacity argument. Scratch storage is private to each call and freed
 return. On error the list starts with a zero record.
 
 Brightness selection helps retain useful stars across focus frames, but list
-rank is not identity: a future autofocus curve still needs positional matching.
+rank is not identity: the independent focus curve matches stars by position.
 
 The 72-byte, eight-byte-aligned `StarRecord` layout is declared in
 `native\image_analysis.h` and in `ForthAstroFormats\Frame.f`:
@@ -99,7 +99,59 @@ and deploy `ImageAnalysisNative.dll` to MPE's Bin directory. Compile
 `native\image_analysis.c` with `native\test_image_analysis.c` to run the
 dependency-free numerical regression.
 
+## Independent native focus curve
+
+The same DLL exports the C-only API in `native\focus_curve.h`:
+
+```c
+int start_computation(uint32_t max_stars);
+int add_focus_point(const StarRecord *stars, int32_t focus_position,
+                    uint32_t *exposure);
+int finish_computation(int32_t *best_focus, uint32_t *error);
+```
+
+There is one active computation, not thread-safe. `start_computation` discards
+any previous run and accepts 1..256 identities to follow; it returns 0 or -1.
+The first accepted list establishes up to that many usable identities, in list
+order. Later lists match mutual nearest centroids within eight bitmap pixels;
+ties and competing matches are omitted. Keep ROI/binning fixed. List rank can
+change, and missing identities are never replaced by newly discovered stars.
+
+`add_focus_point` copies matched HFDs and the actual signed focuser-step
+position; the caller may immediately reuse or free the input list. Partial
+matches are accepted; no matches returns -1, not an underexposure diagnosis.
+Exposure is unsigned integer microseconds. Return values are:
+
+| Return | Meaning |
+| --- | --- |
+| 0 | Sample accepted; exposure unchanged |
+| 1 | Overexposed; exposure rewritten; retry at the same focus |
+| 2 | Underexposed; exposure rewritten; retry at the same focus |
+| -1 | Other failure; exposure unchanged |
+
+The maximum raw peak among matched identities must be within 10,000..50,000
+ADU inclusive. Outside that band, recommend exposure proportional to a 30,000
+ADU target; any matched digital clipping instead recommends half the exposure.
+Unrepresentable, zero or unchanged recommendations fail. Rejected samples
+neither enter the fit nor establish/update tracking.
+
+`finish_computation` ends and frees the run, returning 0 or -1. Each usable
+star needs at least five distinct focus positions. Fit two least-squares
+linear branches, with at least two observations per branch, negative/positive
+slopes and their intersection bracketed between the inner branch samples.
+Choose the valid split with lowest residual sum of squares; do not extrapolate.
+Combine usable stellar focus estimates by their median. Return the rounded
+signed integer best focus and an unsigned integer uncertainty in focuser steps:
+the ceiling of the largest of one step, median propagated fit error, and
+1.4826 times the median absolute deviation between stellar focus estimates.
+This is a diagnostic, not a calibrated confidence interval. No usable fit
+returns -1 and leaves both outputs unchanged.
+
+The curve module consumes only star records: it never invokes bitmap analysis,
+controls equipment, writes FITS metadata or decides whether to apply focus.
+Compile `native\focus_curve.c` with `native\test_focus_curve.c` alone for its
+synthetic regression. No Forth curve binding or autofocus script is supplied yet.
+
 This is a replacement API, not an adapter. The previous `IA_*` analysis and
 autofocus exports are removed. The legacy application autofocus script is no
-longer automatically loaded. A separate stateful curve modeller and its
-Forth autofocus orchestration are not implemented here.
+longer automatically loaded.

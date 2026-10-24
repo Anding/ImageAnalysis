@@ -1,6 +1,8 @@
 ## Next steps for ImageAnalysis
 
-The native package now provides only stateless star records. The items below
+The native package provides stateless star records and an independent
+piecewise-V fitter consuming those records. No Forth curve caller exists yet.
+The items below
 are future work, not functionality supplied by the current DLL; the old
 combined analysis/autofocus API has been removed.
 
