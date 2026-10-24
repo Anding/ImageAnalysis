@@ -11,7 +11,6 @@
 } } while (0)
 #define NEAR(value, expected, tolerance) CHECK(fabs((value) - (expected)) < (tolerance))
 
-static uint32_t histogram[65536];
 static StarRecord stars[MAX_STARS + 2];
 
 static void fill(uint16_t *pixels, unsigned count, uint16_t value)
@@ -21,18 +20,20 @@ static void fill(uint16_t *pixels, unsigned count, uint16_t value)
         pixels[i] = value;
 }
 
-static int analyze_limit(uint16_t *pixels, unsigned width, unsigned height, unsigned limit)
+static int analyze_background(uint16_t *pixels, unsigned width, unsigned height,
+    unsigned background, unsigned limit)
 {
-    unsigned i;
     int result;
-    memset(histogram, 0, sizeof(histogram));
-    for (i = 0; i < width * height; ++i)
-        ++histogram[pixels[i]];
     memset(stars, 0xa5, sizeof(stars));
-    result = AnalyzeStars(pixels, width, height, histogram, limit, stars);
+    result = AnalyzeStars(pixels, width, height, background, limit, stars);
     CHECK(result >= 0 && (unsigned)result <= limit);
     CHECK(stars[result].positive_pixel_count == 0);
     return result;
+}
+
+static int analyze_limit(uint16_t *pixels, unsigned width, unsigned height, unsigned limit)
+{
+    return analyze_background(pixels, width, height, 1000, limit);
 }
 
 static int analyze(uint16_t *pixels, unsigned width, unsigned height)
@@ -63,6 +64,7 @@ static void small_sources(void)
     saved = stars[0];
     CHECK(analyze(pixels, 64, 64) == 1);
     CHECK(memcmp(&saved, stars, sizeof(saved)) == 0);
+    CHECK(analyze_background(pixels, 64, 64, 1100, MAX_STARS) == 0);
 
     pixels[32 * 64 + 33] = 65535;
     CHECK(analyze(pixels, 64, 64) == 1);
@@ -92,9 +94,9 @@ static void small_sources(void)
     CHECK(analyze(pixels, 64, 64) == 1); /* aperture just touches x=0 */
 
     fill(pixels, 64 * 64, 65535);
-    CHECK(analyze(pixels, 64, 64) == 0);
+    CHECK(analyze_background(pixels, 64, 64, 65535, MAX_STARS) == 0);
     fill(pixels, 64 * 64, 0);
-    CHECK(analyze(pixels, 64, 64) == 0);
+    CHECK(analyze_background(pixels, 64, 64, 0, MAX_STARS) == 0);
     CHECK(analyze(pixels, 1, 1) == 0);
 }
 
@@ -151,9 +153,7 @@ static void limit_and_independence(void)
     for (x = 1; x < MAX_STARS; ++x)
         CHECK(stars[x - 1].flux > stars[x].flux);
     fill(pixels, WIDTH * WIDTH, 2000);
-    memset(histogram, 0, sizeof(histogram));
-    histogram[2000] = WIDTH * WIDTH;
-    CHECK(AnalyzeStars(pixels, WIDTH, WIDTH, histogram, 10, other) == 0);
+    CHECK(AnalyzeStars(pixels, WIDTH, WIDTH, 2000, 10, other) == 0);
     NEAR(stars[255].y, 64, 1e-12); /* no process-global result storage */
     free(pixels);
 }
@@ -187,7 +187,7 @@ static void selection_and_order(void)
     NEAR(stars[1].flux, 800, 1e-12);
     CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 10) == 3);
     CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 0) == 0);
-    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, histogram, 257, stars) == -1);
+    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 257, stars) == -1);
     CHECK(stars[0].positive_pixel_count == 0);
 
     /* Equal discovery/measured flux: X precedes Y, even at the selection cut. */
@@ -228,7 +228,7 @@ int main(void)
     gaussian();
     limit_and_independence();
     selection_and_order();
-    CHECK(AnalyzeStars(NULL, 64, 64, histogram, 10, stars) == -1);
+    CHECK(AnalyzeStars(NULL, 64, 64, 1000, 10, stars) == -1);
     CHECK(stars[0].positive_pixel_count == 0);
     puts("Star analysis native regression passed");
     return 0;

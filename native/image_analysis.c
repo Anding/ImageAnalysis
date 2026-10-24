@@ -51,18 +51,6 @@ static void retain(Candidate *candidates, int *count, int limit, Candidate candi
     candidates[i] = candidate;
 }
 
-static double background(const uint32_t *histogram, size_t count)
-{
-    uint64_t cumulative = 0;
-    uint32_t bin;
-    for (bin = 0; bin < 65536; ++bin) {
-        cumulative += histogram[bin];
-        if (cumulative > count / 2)
-            return bin;
-    }
-    return 65535;
-}
-
 static int inside(double x, double y, uint32_t width, uint32_t height)
 {
     return x >= APERTURE && y >= APERTURE &&
@@ -246,28 +234,26 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
 }
 
 int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
-    uint32_t height, const uint32_t *histogram, uint32_t max_stars,
+    uint32_t height, uint32_t background, uint32_t max_stars,
     StarRecord *stars)
 {
     Candidate candidates[MAX_STARS];
-    double sky;
     int selected, i, found = 0;
 
     if (!stars)
         return -1;
     memset(stars, 0, sizeof(*stars));
-    if (!pixels || !histogram || !width || !height ||
+    if (!pixels || !width || !height ||
         width > INT32_MAX || height > INT32_MAX || max_stars > MAX_STARS ||
         (size_t)width > SIZE_MAX / height)
         return -1;
     if (max_stars == 0)
         return 0;
-    sky = background(histogram, (size_t)width * height);
-    selected = discover(pixels, width, height, sky, (int)max_stars, candidates);
+    selected = discover(pixels, width, height, background, (int)max_stars, candidates);
     if (selected < 0)
         return selected;
     for (i = 0; i < selected; ++i) {
-        if (measure(pixels, width, height, sky, candidates[i].x, candidates[i].y,
+        if (measure(pixels, width, height, background, candidates[i].x, candidates[i].y,
                     stars + found))
             ++found;
     }

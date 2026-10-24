@@ -9,32 +9,34 @@ It does not invoke star analysis.
 
 ```forth
 need StarAnalysis
-10 -> default.maxstars
 image compute-imageStats
-image analyze-stars
+image 10 analyze-stars
 image FRAME_STARS @  \ Address of the headerless, zero-terminated StarRecord list.
 ```
 
-`analyze-stars` uses the histogram already prepared by the earlier image
-analysis stage and replaces its star list. The caller owns consistent stage
-selection; star analysis neither recomputes the histogram nor checks other
-stage bits. It allocates no result/statistics storage and writes **no FITS
+`analyze-stars ( frame max_stars -- )` reads `MEDIAN` from the frame metadata,
+converts it to an unsigned 16-bit integer, and supplies that background to C.
+Missing, malformed or out-of-range metadata supplies zero. It neither passes
+nor scans the histogram. The caller owns consistent stage selection.
+It allocates no result/statistics storage and writes **no FITS
 metadata**. Native failures leave an empty list and are logged without aborting.
 See `StarAnalysis_test1.f` for an executable synthetic-frame tutorial.
 `DisplayFunction.f` remains the histogram-based display stretch.
 
 ## Native contract
 
-`AnalyzeStars(pixels, width, height, histogram, max_stars, stars)` receives a
-contiguous unsigned 16-bit bitmap, its logical dimensions, a matching
-65,536-bin `uint32_t` histogram, a per-call measurement limit, and the output
-address. Forth reads `default.maxstars` on **every call**; its initial value
-is 10 and the environment sets it explicitly. C stores no configured limit.
+`AnalyzeStars(pixels, width, height, background, max_stars, stars)` receives a
+contiguous unsigned 16-bit bitmap, its logical dimensions, the already
+calculated background in ADU, a per-call measurement limit, and the output
+address. The application owns `starAnalysis.default.maxStars` (environment
+value 10). `expose` reads it and passes it through `<expose>` and
+`pipeline-process` to `analyze-stars`; explicit callers supply their own limit.
+C stores no configured limit.
 `max_stars` accepts 0..256; zero returns an empty list. It returns the number
 of measured stars, or a negative error (`-1` invalid input, including a limit
 above 256; `-2` allocation failure).
-The histogram supplies the upper median background; there is no local
-background estimation, SNR, frame summary, equipment context or run state.
+There is no native background calculation, SNR, frame summary, equipment
+context or run state.
 
 Detection uses eight-connected pixels **greater than median + 16 ADU**, at
 least three pixels per component. Each component supplies one candidate;
