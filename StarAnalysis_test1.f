@@ -78,5 +78,26 @@ stars.test.frame compute-imageStats
 T{ stars.test.frame FRAME_STATISTICS @ }T stars.test.stats ==
 stars.test.frame analyze-stars
 T{ stars.test.list star.positive-pixel-count @ }T 0 ==
+\ The configured limit selects the brightest candidate, not the first scanned.
+1100 18 18 stars.test.pixel
+1200 19 18 stars.test.pixel
+1100 18 19 stars.test.pixel
+2100 45 45 stars.test.pixel
+3200 46 45 stars.test.pixel
+2100 45 46 stars.test.pixel
+stars.test.frame compute-histogram
+1 -> default.maxstars
+T{ stars.test.frame analyze-stars }T ==
+T{ stars.test.list star.x df@ f>s }T 45 ==
+T{ stars.test.list StarRecord + star.positive-pixel-count @ }T 0 ==
+2 -> default.maxstars
+T{ stars.test.frame analyze-stars }T ==
+T{ stars.test.list star.x df@ f>s }T 45 ==
+T{ stars.test.list StarRecord + star.x df@ f>s }T 18 ==
+T{ stars.test.list StarRecord 2* + star.positive-pixel-count @ }T 0 ==
+0 -> default.maxstars
+T{ stars.test.frame analyze-stars }T ==
+T{ stars.test.list star.positive-pixel-count @ }T 0 ==
+10 -> default.maxstars
 T{ stars.test.frame free-frame stars.test.other free-frame }T ==
 Tend

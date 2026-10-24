@@ -9,6 +9,7 @@ It does not invoke star analysis.
 
 ```forth
 need StarAnalysis
+10 -> default.maxstars
 image compute-imageStats
 image analyze-stars
 image FRAME_STARS @  \ Address of the headerless, zero-terminated StarRecord list.
@@ -24,25 +25,45 @@ See `StarAnalysis_test1.f` for an executable synthetic-frame tutorial.
 
 ## Native contract
 
-`AnalyzeStars(pixels, width, height, histogram, stars)` receives only a
+`AnalyzeStars(pixels, width, height, histogram, max_stars, stars)` receives a
 contiguous unsigned 16-bit bitmap, its logical dimensions, a matching
-65,536-bin `uint32_t` histogram, and the output address. It returns the number
-of stars, or a negative error (`-1` invalid input, `-2` allocation failure).
+65,536-bin `uint32_t` histogram, a per-call measurement limit, and the output
+address. Forth reads `default.maxstars` on **every call**; its initial value
+is 10 and the environment sets it explicitly. C stores no configured limit.
+`max_stars` accepts 0..256; zero returns an empty list. It returns the number
+of measured stars, or a negative error (`-1` invalid input, including a limit
+above 256; `-2` allocation failure).
 The histogram supplies the upper median background; there is no local
 background estimation, SNR, frame summary, equipment context or run state.
 
 Detection uses eight-connected pixels **greater than median + 16 ADU**, at
 least three pixels per component. Each component supplies one candidate;
-there is no deblending or brightness ranking. A positive-flux centroid
+there is no deblending. Discovery scans the **whole bitmap**, accumulating
+background-subtracted flux over each component's above-threshold pixels.
+It retains the brightest `max_stars` candidates by this **discovery flux**,
+breaking equal-flux ties by increasing X, then increasing Y. Candidates whose
+discovery-centred aperture crosses the edge are excluded before selection.
+
+Measurement is a separate phase, applied only to the selected candidates.
+A positive-flux centroid
 refinement sets the circular 16-pixel measurement aperture. Candidates whose
 aperture crosses an image edge are omitted. Nearby candidates can contaminate
 each other's apertures; these initial rules do not classify blends.
 
-Return at most **256 stars**, in component discovery order (row-major scan),
-then a zero record. Reaching 256 is normal completion. The caller always
+Return at most **max_stars** records, ordered by **measured aperture flux
+descending, X ascending, Y ascending**, then a zero record. A candidate rejected
+during measurement is omitted without measuring a replacement, so fewer
+records can be returned. Discovery flux is a fast selection proxy: this does
+not guarantee the globally brightest stars by aperture flux. Sub-threshold
+wings can change the measured order.
+
+The caller always
 provides **257 records**, including the terminator; there is no buffer header
-or capacity argument. Scratch storage is private to each call and freed before
+or separate capacity argument. Scratch storage is private to each call and freed before
 return. On error the list starts with a zero record.
+
+Brightness selection helps retain useful stars across focus frames, but list
+rank is not identity: a future autofocus curve still needs positional matching.
 
 The 72-byte, eight-byte-aligned `StarRecord` layout is declared in
 `native\image_analysis.h` and in `ForthAstroFormats\Frame.f`:

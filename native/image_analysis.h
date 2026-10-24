@@ -33,12 +33,15 @@ typedef struct StarRecord {
 /*
  * pixels: contiguous width*height unsigned 16-bit samples.
  * histogram: matching 65,536-bin uint32_t histogram.
+ * max_stars: 0..MAX_STARS; select by discovery flux before measuring.
  * stars: space for MAX_STARS records plus a zero terminator.
- * Returns the count (0..256), -1 for invalid inputs, -2 for allocation failure.
+ * Records sort by measured flux descending, then x ascending, then y ascending.
+ * Returns the count (0..max_stars), -1 for invalid inputs, -2 for allocation failure.
  * On error the output list is empty. Inputs are never modified.
  */
 EXPORT int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
-    uint32_t height, const uint32_t *histogram, StarRecord *stars);
+    uint32_t height, const uint32_t *histogram, uint32_t max_stars,
+    StarRecord *stars);
 
 #ifdef __cplusplus
 }
