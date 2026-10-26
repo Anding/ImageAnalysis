@@ -1,10 +1,9 @@
 # ImageAnalysis
 
-`NEED ImageAnalysis` loads `Library.f`, which composes the pixel/statistics
-and display-function sources. It depends on Formats, not on the application.
-`NEED FocusCurve` independently loads the stateful curve ABI in `FocusCurve.f`.
-`NEED StarAnalysis` loads the stateless star binding and retains access to the
-curve vocabulary for existing callers; the declarations have separate owners.
+`NEED ImageAnalysis` loads the complete repository through `Library.f`:
+pixel/statistics, display functions, stateless stars and the stateful focus-curve
+ABI. It depends on Formats, not on the application. These remain separate source
+files, not independently loadable packages.
 
 `ImageAnalysis.f` contains the Forth histogram, pixel-statistics and image
 combination code. `compute-imageStats` writes only the existing pixel FITS
@@ -15,7 +14,7 @@ It does not invoke star analysis.
 Pass a caller-owned `frame` explicitly; no global `image` is defined:
 
 ```forth
-need StarAnalysis
+need ImageAnalysis
 frame compute-imageStats
 frame analyze-stars
 frame FRAME_STARS @  \ Address of the headerless, zero-terminated StarRecord list.

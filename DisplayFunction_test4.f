@@ -4,7 +4,7 @@
 \ metadata propagation as well as the pixel transform.
 
 NEED ImageAnalysis
-NEED ForthImageLoaders
+NEED ForthAstroFormats
 NEED simple-tester
 
 0 value img1

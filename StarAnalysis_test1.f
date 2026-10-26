@@ -1,5 +1,5 @@
 \ Executable tutorial: frame-owned native records, independent of FITS output.
-need StarAnalysis
+need ImageAnalysis
 need simple-tester
 
 starAnalysis.star-limit constant stars.test.saved-limit

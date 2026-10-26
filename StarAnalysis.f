@@ -1,5 +1,4 @@
 \ Stateless native star analysis; records belong to frames.
-need ImageAnalysis
 need ForthVT100
 
 10 value starAnalysis.star-limit \ Brightest candidates to measure, from 0 to 256.
