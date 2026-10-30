@@ -5,7 +5,7 @@ need ForthVT100
 
 LIBRARY: ImageAnalysisNative.dll
 Extern: int "C" AnalyzeStars(
-    int * pixels, int width, int height, int background,
+    int * pixels, int width, int height, int background, int minimum_signal,
     int max_stars, int * stars
 ) ;
 
@@ -24,6 +24,7 @@ Extern: int "C" AnalyzeStars(
     frame FRAME_WIDTH @
     frame FRAME_HEIGHT @
     frame star-background
+    frame FRAME_STATISTICS @ MEDIAN_ABSOLUTE_DEVIATION @ 6 * 16 max
     starAnalysis.star-limit
     frame FRAME_STARS @
     AnalyzeStars 0< IF s" Native star analysis failed" .E> THEN

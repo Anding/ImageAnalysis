@@ -31,9 +31,9 @@ See `StarAnalysis_test1.f` for an executable synthetic-frame tutorial.
 
 ## Native contract
 
-`AnalyzeStars(pixels, width, height, background, max_stars, stars)` receives a
+`AnalyzeStars(pixels, width, height, background, minimum_signal, max_stars, stars)` receives a
 contiguous unsigned 16-bit bitmap, its logical dimensions, the already
-calculated background in ADU, a per-call measurement limit, and the output
+calculated background and detection threshold in ADU, a per-call measurement limit, and the output
 address. `StarAnalysis.f` defines `starAnalysis.star-limit` with default 10.
 Callers can change it directly; `analyze-stars` reads its current value and
 passes it to C. Temporary overrides are saved/restored by their callers.
@@ -45,24 +45,26 @@ above 256; `-2` allocation failure).
 There is no native background calculation, SNR, frame summary, equipment
 context or run state.
 
-Detection uses eight-connected pixels **greater than median + 16 ADU**, at
+The existing Forth binding supplies `max(16, 6 * MAD)` from frame statistics.
+Detection uses eight-connected pixels **greater than median + max(16, minimum_signal) ADU**, at
 least three pixels per component. Each component supplies one candidate;
 there is no deblending. Discovery scans the **whole bitmap**, accumulating
 background-subtracted flux over each component's above-threshold pixels.
-It retains the brightest `max_stars` candidates by this **discovery flux**,
+After measurement rejects invalid apertures and HFD outside 1..16 pixels,
+selection prefers candidates with at most three saturated pixels, then
+retains the brightest `max_stars` candidates by this **discovery flux**,
 breaking equal-flux ties by increasing X, then increasing Y. Candidates whose
 discovery-centred aperture crosses the edge are excluded before selection.
 
-Measurement is a separate phase, applied only to the selected candidates.
+Measurement precedes selection so invalid bright objects cannot consume slots.
 A positive-flux centroid
 refinement sets the circular 16-pixel measurement aperture. Candidates whose
 aperture crosses an image edge are omitted. Nearby candidates can contaminate
 each other's apertures; these initial rules do not classify blends.
 
 Return at most **max_stars** records, ordered by **measured aperture flux
-descending, X ascending, Y ascending**, then a zero record. A candidate rejected
-during measurement is omitted without measuring a replacement, so fewer
-records can be returned. Discovery flux is a fast selection proxy: this does
+descending, X ascending, Y ascending**, then a zero record. Clipped candidates
+remain available as fallbacks for exposure guidance. Discovery flux is a selection proxy: this does
 not guarantee the globally brightest stars by aperture flux. Sub-threshold
 wings can change the measured order.
 
@@ -124,6 +126,8 @@ The first accepted list establishes up to that many usable identities, in list
 order. Later lists match mutual nearest centroids within eight bitmap pixels;
 ties and competing matches are omitted. Keep ROI/binning fixed. List rank can
 change, and missing identities are never replaced by newly discovered stars.
+Unused slots may acquire later detections, with earlier samples left missing.
+Clipped detections do not displace nearby usable matches.
 
 `add_focus_point` copies matched HFDs and the actual signed focuser-step
 position; the caller may immediately reuse or free the input list. Partial
@@ -133,20 +137,22 @@ Exposure is unsigned integer microseconds. Return values are:
 | Return | Meaning |
 | --- | --- |
 | 0 | Sample accepted; exposure unchanged |
-| 1 | Overexposed; exposure rewritten; retry at the same focus |
-| 2 | Underexposed; exposure rewritten; retry at the same focus |
+| 1 | Only clipped matches available; exposure halved; retry at the same focus |
 | -1 | Other failure; exposure unchanged |
 
-The maximum raw peak among matched identities must be within 10,000..50,000
-ADU inclusive. Outside that band, recommend exposure proportional to a 30,000
-ADU target; any matched digital clipping instead recommends half the exposure.
-Unrepresentable, zero or unchanged recommendations fail. Rejected samples
+Each usable identity needs HFD in 1..16 pixels and at most three saturated
+pixels. Dim stars and isolated saturated pixels do not trigger exposure changes.
+Other usable stars allow a sample to proceed despite clipped detections.
+Only when no usable match remains does clipping recommend half the exposure,
+with a 100 ms floor; unchanged or increasing recommendations fail. Rejected samples
 neither enter the fit nor establish/update tracking.
 
 `finish_computation` ends and frees the run, returning 0 or -1. Each usable
 star needs at least five distinct focus positions. Fit two least-squares
 linear branches, with at least two observations per branch, negative/positive
 slopes and their intersection bracketed between the inner branch samples.
+Each branch must rise by at least 0.5 pixel or 10% of the fitted minimum,
+whichever is larger, to reject nearly focus-independent sources.
 Choose the valid split with lowest residual sum of squares; do not extrapolate.
 Combine usable stellar focus estimates by their median. Return the rounded
 signed integer best focus and an unsigned integer uncertainty in focuser steps:
@@ -154,6 +160,9 @@ the ceiling of the largest of one step, median propagated fit error, and
 1.4826 times the median absolute deviation between stellar focus estimates.
 This is a diagnostic, not a calibrated confidence interval. No usable fit
 returns -1 and leaves both outputs unchanged.
+These are aperture and curve-quality filters, not a galaxy classifier.
+Compact nuclei can resemble stellar profiles; offline checks do not establish
+reliable autofocus under every sky condition.
 
 The curve module consumes only star records: it never invokes bitmap analysis,
 controls equipment, writes FITS metadata or decides whether to apply focus.

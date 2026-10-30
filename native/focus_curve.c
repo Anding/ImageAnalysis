@@ -43,12 +43,13 @@ int CALL start_computation(uint32_t max_stars)
 
 static int usable(const StarRecord *star)
 {
+    /* A uniform 16-pixel aperture has HFD about 23: it is not a resolved star. */
     return isfinite(star->x) && isfinite(star->y) &&
-        isfinite(star->hfd) && star->hfd > 0;
+        isfinite(star->hfd) && star->hfd >= 1 && star->hfd <= 16;
 }
 
 /* Mutual nearest neighbours within eight pixels; never share a detection. */
-static void match(const StarRecord *stars, int count, int *indices)
+static void match(const StarRecord *stars, int count, int *indices, int *clipped)
 {
     int i, j;
     for (i = 0; i < run.tracked; ++i) {
@@ -61,6 +62,11 @@ static void match(const StarRecord *stars, int count, int *indices)
             dx = stars[j].x - run.x[i];
             dy = stars[j].y - run.y[i];
             distance = dx * dx + dy * dy;
+            if (stars[j].saturated_pixel_count > 3) {
+                if (distance <= 64)
+                    *clipped = 1;
+                continue;
+            }
             if (distance < best || (distance == best && selected < 0)) {
                 best = distance;
                 selected = j;
@@ -83,29 +89,22 @@ static void match(const StarRecord *stars, int count, int *indices)
     }
 }
 
-/* Raw-peak exposure guidance only: no SNR, noise or missing-star inference. */
-static int exposure_status(uint32_t peak, int clipped, uint32_t *exposure)
+/* Only widespread clipping warrants a shorter exposure; dim is not unusable. */
+static int exposure_status(uint32_t *exposure)
 {
-    uint64_t recommended;
-    int status;
-    if (!clipped && peak >= 10000 && peak <= 50000)
-        return 0;
-    if (peak == 0)
+    uint32_t recommended = *exposure / 2;
+    if (recommended < 100000)
+        recommended = 100000;
+    if (recommended >= *exposure)
         return -1;
-    status = clipped || peak > 50000 ? 1 : 2;
-    recommended = clipped ? *exposure / 2 :
-        ((uint64_t)*exposure * 30000 + peak / 2) / peak;
-    if (recommended == 0 || recommended > UINT32_MAX || recommended == *exposure)
-        return -1;
-    *exposure = (uint32_t)recommended;
-    return status;
+    *exposure = recommended;
+    return 1;
 }
 
 int CALL add_focus_point(const StarRecord *stars, int32_t focus_position,
     uint32_t *exposure)
 {
-    int indices[MAX_STARS], count = 0, tracked, i, matched = 0, clipped = 0, status;
-    uint32_t peak = 0;
+    int indices[MAX_STARS], count = 0, tracked, i, matched = 0, clipped = 0;
     FocusPoint point = {0};
 
     if (!run.active || !stars || !exposure || *exposure == 0)
@@ -114,11 +113,31 @@ int CALL add_focus_point(const StarRecord *stars, int32_t focus_position,
         ++count;
     tracked = run.tracked;
     if (tracked == 0) {
-        for (i = 0; i < count && tracked < run.limit; ++i)
-            if (usable(stars + i))
+        for (i = 0; i < count; ++i) {
+            if (!usable(stars + i))
+                continue;
+            if (stars[i].saturated_pixel_count > 3) {
+                clipped = 1;
+                continue;
+            }
+            if (tracked < run.limit)
                 indices[tracked++] = i;
+        }
     } else {
-        match(stars, count, indices);
+        match(stars, count, indices, &clipped);
+        /* Fill unused slots when new stars appear; never replace a lost identity. */
+        for (i = 0; i < count && tracked < run.limit; ++i) {
+            int j;
+            if (!usable(stars + i) || stars[i].saturated_pixel_count > 3)
+                continue;
+            for (j = 0; j < run.tracked; ++j) {
+                double dx = stars[i].x - run.x[j], dy = stars[i].y - run.y[j];
+                if (dx * dx + dy * dy <= 64)
+                    break;
+            }
+            if (j == run.tracked)
+                indices[tracked++] = i;
+        }
     }
     point.position = focus_position;
     for (i = 0; i < tracked; ++i) {
@@ -126,17 +145,16 @@ int CALL add_focus_point(const StarRecord *stars, int32_t focus_position,
         if (indices[i] < 0)
             continue;
         star = stars + indices[i];
+        if (star->saturated_pixel_count > 3) {
+            indices[i] = -1;
+            clipped = 1;
+            continue;
+        }
         point.hfd[i] = star->hfd;
-        if (star->max_pixel > peak)
-            peak = star->max_pixel;
-        clipped |= star->saturated_pixel_count != 0 || star->max_pixel == 65535;
         ++matched;
     }
     if (matched == 0)
-        return -1;
-    status = exposure_status(peak, clipped, exposure);
-    if (status != 0)
-        return status;
+        return clipped ? exposure_status(exposure) : -1;
     if (run.count == run.capacity) {
         size_t capacity = run.capacity ? run.capacity * 2 : 16;
         FocusPoint *grown;
@@ -221,7 +239,7 @@ static int fit_curve(CurvePoint *points, size_t count, double *focus, double *er
         return 0;
     for (split = 2; split <= count - 2; ++split) {
         Line left, right;
-        double x, sse, variance, dx_left, dx_right, slope_difference;
+        double x, y, contrast, sse, variance, dx_left, dx_right, slope_difference;
         if (points[split - 1].x == points[split].x ||
             !fit_line(points, split, &left) ||
             !fit_line(points + split, count - split, &right) ||
@@ -231,6 +249,12 @@ static int fit_curve(CurvePoint *points, size_t count, double *focus, double *er
         x = (right.y - right.slope * right.x -
              left.y + left.slope * left.x) / slope_difference;
         if (x < points[split - 1].x || x > points[split].x)
+            continue;
+        y = left.y + left.slope * (x - left.x);
+        contrast = fmax(0.5, 0.1 * y);
+        if (y <= 0 ||
+            left.slope * (points[0].x - x) < contrast ||
+            right.slope * (points[count - 1].x - x) < contrast)
             continue;
         sse = left.sse + right.sse;
         if (sse >= best_sse)

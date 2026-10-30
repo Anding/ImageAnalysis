@@ -25,7 +25,7 @@ static int analyze_background(uint16_t *pixels, unsigned width, unsigned height,
 {
     int result;
     memset(stars, 0xa5, sizeof(stars));
-    result = AnalyzeStars(pixels, width, height, background, limit, stars);
+    result = AnalyzeStars(pixels, width, height, background, 16, limit, stars);
     CHECK(result >= 0 && (unsigned)result <= limit);
     CHECK(stars[result].positive_pixel_count == 0);
     return result;
@@ -67,9 +67,7 @@ static void small_sources(void)
     CHECK(analyze_background(pixels, 64, 64, 1100, MAX_STARS) == 0);
 
     pixels[32 * 64 + 33] = 65535;
-    CHECK(analyze(pixels, 64, 64) == 1);
-    CHECK(stars[0].saturated_pixel_count == 1 && stars[0].max_pixel == 65535);
-    NEAR(stars[0].flux, 64735, 1e-12);
+    CHECK(analyze(pixels, 64, 64) == 0); /* hot pixel with two weak neighbours */
 
     /* A fixed 16-ADU threshold, minimum three eight-connected pixels. */
     fill(pixels, 64 * 64, 1000);
@@ -123,9 +121,7 @@ static void gaussian(void)
     for (y = 40; y < 88; ++y)
         for (x = 40; x < 88; ++x)
             pixels[y * 128 + x] = 1100;
-    CHECK(analyze(pixels, 128, 128) == 1);
-    NEAR(stars[0].x, 63.5, 1e-12);
-    NEAR(stars[0].y, 63.5, 1e-12);
+    CHECK(analyze(pixels, 128, 128) == 0);
 }
 
 static void limit_and_independence(void)
@@ -138,9 +134,9 @@ static void limit_and_independence(void)
     fill(pixels, WIDTH * WIDTH, 1000);
     for (y = 24; y <= 664; y += 40) {
         for (x = 24; x <= 664; x += 40) {
-            pixels[y * WIDTH + x - 1] = 1100;
-            pixels[y * WIDTH + x] = (uint16_t)(1200 + (y - 24) / 40 * 17 + (x - 24) / 40);
-            pixels[y * WIDTH + x + 1] = 1100;
+            pixels[y * WIDTH + x - 1] = pixels[y * WIDTH + x + 1] = 1200;
+            pixels[(y - 1) * WIDTH + x] = pixels[(y + 1) * WIDTH + x] = 1200;
+            pixels[y * WIDTH + x] = (uint16_t)(1400 + (y - 24) / 40 * 17 + (x - 24) / 40);
         }
     }
     CHECK(analyze(pixels, WIDTH, WIDTH) == 256);
@@ -153,7 +149,7 @@ static void limit_and_independence(void)
     for (x = 1; x < MAX_STARS; ++x)
         CHECK(stars[x - 1].flux > stars[x].flux);
     fill(pixels, WIDTH * WIDTH, 2000);
-    CHECK(AnalyzeStars(pixels, WIDTH, WIDTH, 2000, 10, other) == 0);
+    CHECK(AnalyzeStars(pixels, WIDTH, WIDTH, 2000, 16, 10, other) == 0);
     NEAR(stars[255].y, 64, 1e-12); /* no process-global result storage */
     free(pixels);
 }
@@ -163,6 +159,8 @@ static void source(uint16_t *pixels, unsigned width, unsigned x, unsigned y, uns
     pixels[y * width + x - 1] = (uint16_t)(1000 + signal);
     pixels[y * width + x] = (uint16_t)(1000 + 2 * signal);
     pixels[y * width + x + 1] = (uint16_t)(1000 + signal);
+    pixels[(y - 1) * width + x] = (uint16_t)(1000 + signal);
+    pixels[(y + 1) * width + x] = (uint16_t)(1000 + signal);
 }
 
 static void selection_and_order(void)
@@ -183,11 +181,11 @@ static void selection_and_order(void)
     memset(&guard, 0xa5, sizeof(guard));
     CHECK(memcmp(stars + 2, &guard, sizeof(guard)) == 0);
     CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 2) == 2);
-    NEAR(stars[0].flux, 1200, 1e-12);
-    NEAR(stars[1].flux, 800, 1e-12);
+    NEAR(stars[0].flux, 1800, 1e-12);
+    NEAR(stars[1].flux, 1200, 1e-12);
     CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 10) == 3);
     CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 0) == 0);
-    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 257, stars) == -1);
+    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 16, 257, stars) == -1);
     CHECK(stars[0].positive_pixel_count == 0);
 
     /* Equal discovery/measured flux: X precedes Y, even at the selection cut. */
@@ -216,8 +214,62 @@ static void selection_and_order(void)
     NEAR(stars[0].x, 112, 1e-12);
     CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 2) == 2);
     NEAR(stars[0].x, 32, 1e-12);
-    NEAR(stars[0].flux, 1180, 1e-12);
-    NEAR(stars[1].flux, 440, 1e-12);
+    NEAR(stars[0].flux, 1360, 1e-12);
+    NEAR(stars[1].flux, 660, 1e-12);
+}
+
+static void contaminated_candidates(void)
+{
+    enum { WIDTH = 224, HEIGHT = 192 };
+    uint16_t pixels[WIDTH * HEIGHT];
+    unsigned x, y;
+    fill(pixels, WIDTH * HEIGHT, 1000);
+    for (y = 24; y < 72; ++y)
+        for (x = 24; x < 72; ++x)
+            pixels[y * WIDTH + x] = 6000; /* bright diffuse object */
+    source(pixels, WIDTH, 112, 48, 100);
+    pixels[48 * WIDTH + 112] = 65535; /* hot pixel plus weak neighbours */
+    for (y = 112; y < 176; ++y) {
+        for (x = 120; x < 184; ++x) {
+            double dx = (double)x - 152, dy = (double)y - 144;
+            pixels[y * WIDTH + x] = (uint16_t)(1000 +
+                3000 * exp(-(dx * dx + dy * dy) / 32));
+        }
+    }
+    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 1) == 1);
+    NEAR(stars[0].x, 152, 0.01);
+    NEAR(stars[0].y, 144, 0.01);
+    CHECK(stars[0].hfd > 8 && stars[0].hfd < 11); /* retain defocused stars */
+
+    /* A resolved clipped source must not crowd out the fainter usable star. */
+    for (y = 24; y < 72; ++y) {
+        for (x = 88; x < 136; ++x) {
+            double dx = (double)x - 112, dy = (double)y - 48;
+            pixels[y * WIDTH + x] = (uint16_t)fmin(65535, 1000 +
+                100000 * exp(-(dx * dx + dy * dy) / 8));
+        }
+    }
+    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 1) == 1);
+    NEAR(stars[0].x, 152, 0.01);
+    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 2) == 2);
+    CHECK(stars[0].saturated_pixel_count > 3);
+    CHECK(stars[1].saturated_pixel_count == 0);
+
+    /* A supplied noise threshold suppresses connected noise without changing sky. */
+    for (y = 0; y < HEIGHT; ++y)
+        for (x = 0; x < WIDTH; ++x)
+            pixels[y * WIDTH + x] = (uint16_t)(1000 + ((x * 17 + y * 31) % 97) - 48);
+    for (y = 112; y < 176; ++y) {
+        for (x = 120; x < 184; ++x) {
+            double dx = (double)x - 152, dy = (double)y - 144;
+            pixels[y * WIDTH + x] += (uint16_t)(1200 *
+                exp(-(dx * dx + dy * dy) / 8));
+        }
+    }
+    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 192, 1, stars) == 1);
+    NEAR(stars[0].x, 152, 0.2);
+    NEAR(stars[0].y, 144, 0.2);
+    CHECK(stars[1].positive_pixel_count == 0);
 }
 
 int main(void)
@@ -228,7 +280,8 @@ int main(void)
     gaussian();
     limit_and_independence();
     selection_and_order();
-    CHECK(AnalyzeStars(NULL, 64, 64, 1000, 10, stars) == -1);
+    contaminated_candidates();
+    CHECK(AnalyzeStars(NULL, 64, 64, 1000, 16, 10, stars) == -1);
     CHECK(stars[0].positive_pixel_count == 0);
     puts("Star analysis native regression passed");
     return 0;

@@ -9,7 +9,8 @@ enum { APERTURE = 16, RADIAL_SCALE = 16,
     RADIAL_BINS = 2 * APERTURE * RADIAL_SCALE + 1 };
 
 typedef struct Candidate {
-    double x, y, flux;
+    double flux;
+    StarRecord star;
 } Candidate;
 
 /* Brightest first; positional tie-breaks are ascending, not discovery order. */
@@ -27,14 +28,22 @@ static int star_order(const void *left, const void *right)
     return order(a->flux, a->x, a->y, b->flux, b->x, b->y);
 }
 
+static int candidate_order(const Candidate *a, const Candidate *b)
+{
+    int clipped_a = a->star.saturated_pixel_count > 3;
+    int clipped_b = b->star.saturated_pixel_count > 3;
+    if (clipped_a != clipped_b)
+        return clipped_a - clipped_b;
+    return order(a->flux, a->star.x, a->star.y, b->flux, b->star.x, b->star.y);
+}
+
 /* Keep only the best candidates in a small, ordered, bounded array. */
 static void retain(Candidate *candidates, int *count, int limit, Candidate candidate)
 {
     int i = *count;
     if (i == limit) {
         Candidate last = candidates[i - 1];
-        if (order(candidate.flux, candidate.x, candidate.y,
-                  last.flux, last.x, last.y) >= 0)
+        if (candidate_order(&candidate, &last) >= 0)
             return;
         --i;
     } else {
@@ -42,8 +51,7 @@ static void retain(Candidate *candidates, int *count, int limit, Candidate candi
     }
     while (i > 0) {
         Candidate previous = candidates[i - 1];
-        if (order(candidate.flux, candidate.x, candidate.y,
-                  previous.flux, previous.x, previous.y) >= 0)
+        if (candidate_order(&candidate, &previous) >= 0)
             break;
         candidates[i] = previous;
         --i;
@@ -161,12 +169,13 @@ static int measure(const uint16_t *pixels, uint32_t width, uint32_t height,
             break;
         }
     }
-    return 1;
+    /* Reject single-pixel peaks and sources wider than the useful aperture. */
+    return star->hfd >= 1 && star->hfd <= APERTURE;
 }
 
-/* Discover throughout the bitmap; aperture metrics are a separate phase. */
+/* Validate before shortlisting so bright extended objects cannot consume slots. */
 static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
-    double sky, int limit, Candidate *candidates)
+    double sky, double minimum_signal, int limit, Candidate *candidates)
 {
     size_t count = (size_t)width * height, seed, head, tail, capacity = 1024;
     size_t *queue;
@@ -184,7 +193,7 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
     /* Discovery flux includes only the above-threshold component pixels. */
     for (seed = 0; seed < count; ++seed) {
         double flux = 0, sx = 0, sy = 0;
-        if (visited[seed] || pixels[seed] <= sky + 16)
+        if (visited[seed] || pixels[seed] <= sky + minimum_signal)
             continue;
         head = 0;
         tail = 1;
@@ -203,7 +212,7 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
                 for (nx = x > 0 ? x - 1 : 0;
                      nx <= x + 1 && nx < (int)width; ++nx) {
                     size_t neighbour = (size_t)ny * width + nx;
-                    if (visited[neighbour] || pixels[neighbour] <= sky + 16)
+                    if (visited[neighbour] || pixels[neighbour] <= sky + minimum_signal)
                         continue;
                     if (tail == capacity) {
                         size_t next = capacity <= SIZE_MAX / 2 / sizeof(*queue)
@@ -223,8 +232,10 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
             }
         }
         if (tail >= 3) {
-            Candidate candidate = {sx / flux, sy / flux, flux};
-            if (inside(candidate.x, candidate.y, width, height))
+            Candidate candidate;
+            candidate.flux = flux;
+            if (measure(pixels, width, height, sky, sx / flux, sy / flux,
+                        &candidate.star))
                 retain(candidates, &selected, limit, candidate);
         }
     }
@@ -234,7 +245,7 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
 }
 
 int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
-    uint32_t height, uint32_t background, uint32_t max_stars,
+    uint32_t height, uint32_t background, uint32_t minimum_signal, uint32_t max_stars,
     StarRecord *stars)
 {
     Candidate candidates[MAX_STARS];
@@ -245,18 +256,16 @@ int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
     memset(stars, 0, sizeof(*stars));
     if (!pixels || !width || !height ||
         width > INT32_MAX || height > INT32_MAX || max_stars > MAX_STARS ||
-        (size_t)width > SIZE_MAX / height)
+        (size_t)width > SIZE_MAX / height / sizeof(*pixels))
         return -1;
     if (max_stars == 0)
         return 0;
-    selected = discover(pixels, width, height, background, (int)max_stars, candidates);
+    selected = discover(pixels, width, height, background, fmax(16, minimum_signal),
+        (int)max_stars, candidates);
     if (selected < 0)
         return selected;
-    for (i = 0; i < selected; ++i) {
-        if (measure(pixels, width, height, background, candidates[i].x, candidates[i].y,
-                    stars + found))
-            ++found;
-    }
+    for (i = 0; i < selected; ++i)
+        stars[found++] = candidates[i].star;
     qsort(stars, found, sizeof(*stars), star_order);
     memset(stars + found, 0, sizeof(*stars));
     return found;
