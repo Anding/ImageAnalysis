@@ -2,8 +2,6 @@
 need ImageAnalysis
 need simple-tester
 
-starAnalysis.star-limit constant stars.test.saved-limit
-10 -> starAnalysis.star-limit
 64 64 1 allocate-frame constant stars.test.frame
 64 64 1 allocate-frame constant stars.test.other
 stars.test.frame FRAME_STARS @ constant stars.test.list
@@ -27,6 +25,7 @@ stars.test.frame FRAME_STATISTICS @ constant stars.test.stats
 ;
 
 Tstart
+T{ StarRecord star-buffer-bytes }T 104 26728 ==
 \ Every frame has its own empty list, even if star analysis is never requested.
 T{ stars.test.list 0<> }T -1 ==
 T{ stars.test.other FRAME_STARS @ stars.test.list <> }T -1 ==
@@ -52,6 +51,10 @@ T{ stars.test.list star.qyy df@ 10000e f* f>s }T 1875 ==
 T{ stars.test.list star.qxy df@ 1000e f* f>s }T -125 ==
 T{ stars.test.list star.hfd df@ 1e f> }T -1 ==
 T{ stars.test.list star.saturated-pixel-count @ }T 0 ==
+T{ stars.test.list star.roundness df@ 0e f> }T -1 ==
+T{ stars.test.list star.over-exposed-risk df@ f>s }T 0 ==
+T{ stars.test.list star.under-exposed-risk df@ f>s }T 0 ==
+T{ stars.test.list star.exposure-scale df@ 0e f> }T -1 ==
 \ Existing pixel FITS keys are unchanged; no star keys are added.
 T{ stars.test.frame FRAME_METADATA @ map-count }T 5 ==
 T{ s" NSTARS" stars.test.frame FRAME_METADATA @ map@ }T 0 0 ==
@@ -93,25 +96,16 @@ stars.test.frame compute-imageStats
 T{ stars.test.frame FRAME_STATISTICS @ }T stars.test.stats ==
 stars.test.frame analyze-stars
 T{ stars.test.list star.positive-pixel-count @ }T 0 ==
-\ Changing the analysis setting selects the brightest candidates on the next call.
+\ Detection keeps both candidates; autofocus owns its independent survivor count.
 1100 18 18 stars.test.pixel
 1200 19 18 stars.test.pixel
 1100 18 19 stars.test.pixel
 2100 45 45 stars.test.pixel
 3200 46 45 stars.test.pixel
 2100 45 46 stars.test.pixel
-1 -> starAnalysis.star-limit
-T{ stars.test.frame analyze-stars }T ==
-T{ stars.test.list star.x df@ f>s }T 45 ==
-T{ stars.test.list StarRecord + star.positive-pixel-count @ }T 0 ==
-2 -> starAnalysis.star-limit
 T{ stars.test.frame analyze-stars }T ==
 T{ stars.test.list star.x df@ f>s }T 45 ==
 T{ stars.test.list StarRecord + star.x df@ f>s }T 18 ==
 T{ stars.test.list StarRecord 2* + star.positive-pixel-count @ }T 0 ==
-0 -> starAnalysis.star-limit
-T{ stars.test.frame analyze-stars }T ==
-T{ stars.test.list star.positive-pixel-count @ }T 0 ==
 T{ stars.test.frame free-frame stars.test.other free-frame }T ==
-stars.test.saved-limit -> starAnalysis.star-limit
 Tend

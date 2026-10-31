@@ -31,40 +31,34 @@ See `StarAnalysis_test1.f` for an executable synthetic-frame tutorial.
 
 ## Native contract
 
-`AnalyzeStars(pixels, width, height, median, mad, max_stars, stars)` receives a
+`AnalyzeStars(pixels, width, height, median, mad, stars)` receives a
 contiguous unsigned 16-bit bitmap, its logical dimensions, the already
-calculated image-wide median and raw MAD in ADU, a per-call measurement limit, and the output
-address. `StarAnalysis.f` defines `starAnalysis.star-limit` with default 10.
-Callers can change it directly; `analyze-stars` reads its current value and
-passes it to C. Temporary overrides are saved/restored by their callers.
-Neither `<expose>` nor `pipeline-process` takes an analysis-limit argument.
-C stores no configured limit.
-`max_stars` accepts 0..256; zero returns an empty list. It returns the number
-of measured stars, or a negative error (`-1` invalid input, including a limit
-above 256; `-2` allocation failure).
-There is no native background calculation, SNR, frame summary, equipment
+calculated image-wide median and raw MAD in ADU, and the output address.
+There is no detector limit argument or `starAnalysis.star-limit`: every call
+returns up to 256 measured candidates. Negative results are -1 for invalid input
+and -2 for allocation failure.
+There is no native background calculation, calibrated SNR, frame summary, equipment
 context or run state.
 
 The Forth binding reads both values directly from `FRAME_STATISTICS`, without
 reading FITS metadata or recalculating a histogram. C calculates
 `max(MIN_SIGNAL_INCREMENT_ADU, MAD_MULTIPLIER * mad)` above the median.
-The seven-argument layout and `StarRecord` are unchanged, but the fifth argument
-now means **raw MAD**, not a precomputed threshold. Update the DLL and Forth
-binding together, and restart Forth after deployment.
+This is a coordinated ABI change: six arguments and 104-byte records.
+Update the DLL, ImageAnalysis bindings and ForthAstroFormats frame layout together,
+and restart Forth after deployment. Old bindings or record allocations are unsafe.
 
 `native\analysis_parameters.h` contains the compile-time detection, measurement,
 tracking, curve-quality and exposure-guidance settings, with units and comments.
 Rebuild the DLL after changing them; Forth and the C implementation do not duplicate
 the tuning values. Mathematical constants and ABI capacities are not tuning
-parameters. The following description uses the unchanged default values.
+parameters. The following description uses the header's default values.
 
 Detection uses eight-connected pixels **greater than median + max(16, 6 * MAD) ADU**, at
 least three pixels per component. Each component supplies one candidate;
 there is no deblending. Discovery scans the **whole bitmap**, accumulating
 background-subtracted flux over each component's above-threshold pixels.
 After measurement rejects invalid apertures and HFD outside 1..16 pixels,
-selection prefers candidates with at most three saturated pixels, then
-retains the brightest `max_stars` candidates by this **discovery flux**,
+overflow retains the brightest 256 candidates by this **discovery flux**,
 breaking equal-flux ties by increasing X, then increasing Y. Candidates whose
 discovery-centred aperture crosses the edge are excluded before selection.
 
@@ -74,9 +68,9 @@ refinement sets the circular 16-pixel measurement aperture. Candidates whose
 aperture crosses an image edge are omitted. Nearby candidates can contaminate
 each other's apertures; these initial rules do not classify blends.
 
-Return at most **max_stars** records, ordered by **measured aperture flux
-descending, X ascending, Y ascending**, then a zero record. Clipped candidates
-remain available as fallbacks for exposure guidance. Discovery flux is a selection proxy: this does
+Return at most **256** records, ordered by **measured aperture flux
+descending, X ascending, Y ascending**, then a zero record. Saturation is not a
+detection cutoff. Discovery flux is an overflow proxy: this does
 not guarantee the globally brightest stars by aperture flux. Sub-threshold
 wings can change the measured order.
 
@@ -88,7 +82,7 @@ return. On error the list starts with a zero record.
 Brightness selection helps retain useful stars across focus frames, but list
 rank is not identity: the independent focus curve matches stars by position.
 
-The 72-byte, eight-byte-aligned `StarRecord` layout is declared in
+The 104-byte, eight-byte-aligned `StarRecord` layout is declared in
 `native\image_analysis.h` and in `ForthAstroFormats\Frame.f`:
 
 | Offset | Field | Representation |
@@ -100,6 +94,10 @@ The 72-byte, eight-byte-aligned `StarRecord` layout is declared in
 | 32 | `hfd` | `double`; half-flux diameter in bitmap pixels |
 | 40, 48, 56 | `qxx`, `qyy`, `qxy` | `double`; positive-flux central second moments in pixels squared |
 | 64 | `max_pixel` | `uint16_t`; maximum raw aperture sample; six tail-padding bytes |
+| 72 | `roundness` | `double`; minor/major moment-axis width, 0..1 |
+| 80 | `over_exposed_risk` | `double`; soft raw-peak headroom risk, 0..1 |
+| 88 | `under_exposed_risk` | `double`; soft peak-significance risk, 0..1 |
+| 96 | `exposure_scale` | `double`; calculated exposure multiplier |
 
 Use `DF@` for C doubles in VFX Forth, **not `F@`** (80-bit extended).
 Qxx=Qyy alone does not imply roundness: Qxy must also vanish. HFD comes from
@@ -127,61 +125,76 @@ The same DLL exports the API in `native\focus_curve.h`, bound directly by
 
 ```c
 int start_computation(uint32_t max_stars);
+int select_focus_stars(const StarRecord *stars, uint32_t *exposure);
 int add_focus_point(const StarRecord *stars, int32_t focus_position,
                     uint32_t *exposure);
+int finish_focus_point(void);
 int finish_computation(int32_t *best_focus, uint32_t *error);
 ```
 
 There is one active computation, not thread-safe. `start_computation` discards
-any previous run and accepts 1..256 identities to follow; it returns 0 or -1.
-The first accepted list establishes up to that many usable identities, in list
-order. Later lists match mutual nearest centroids within eight bitmap pixels;
-ties and competing matches are omitted. Keep ROI/binning fixed. List rank can
-change, and missing identities are never replaced by newly discovered stars.
-Unused slots may acquire later detections, with earlier samples left missing.
-Clipped detections do not displace nearby usable matches.
+the previous run and accepts the desired final survivor limit, 1..256.
+`select_focus_stars` uses the entry-focus frame only for selection, not curve
+samples. It ranks all candidates by equal default weights of roundness and
+`min(1, flux / (2 * median_candidate_flux))`; coincident centroids are suppressed.
+It freezes up to 256 identities and recommends the run's baseline exposure.
+Later frames never populate new slots. Mutual nearest matching within eight
+pixels skips ambiguous or competing detections. Keep ROI/binning fixed.
 
-`add_focus_point` copies matched HFDs and the actual signed focuser-step
-position; the caller may immediately reuse or free the input list. Partial
-matches are accepted; no matches returns -1, not an underexposure diagnosis.
-Exposure is unsigned integer microseconds. Return values are:
+`add_focus_point` copies the best trial's complete matched HFD set at the current
+position. Trial quality uses exposure risks in the top 32 selected identities,
+including a penalty for missing detections. No clipping/roundness gate discards
+curve samples. `finish_focus_point` commits the best available trial after
+bounded retries, even when exposure targets could not be met. The input list
+may immediately be reused or freed. Exposure is unsigned microseconds.
+`add_focus_point` return values are:
 
 | Return | Meaning |
 | --- | --- |
-| 0 | Sample accepted; exposure unchanged |
-| 1 | Only clipped matches available; exposure halved; retry at the same focus |
-| -1 | Other failure; exposure unchanged |
+| 0 | Desired low-risk coverage met, or no useful exposure change |
+| 1 | Calculated exposure written; retake locally at the same focus |
+| -1 | No measurement evidence or invalid input/allocation failure |
 
-Each usable identity needs HFD in 1..16 pixels and at most three saturated
-pixels. Dim stars and isolated saturated pixels do not trigger exposure changes.
-Other usable stars allow a sample to proceed despite clipped detections.
-Only when no usable match remains does clipping recommend half the exposure,
-with a 100 ms floor; unchanged or increasing recommendations fail. Rejected samples
-neither enter the fit nor establish/update tracking.
+Exposure risks are heuristics, not calibrated probabilities: overexposure uses
+raw ADC headroom; underexposure uses peak signal divided by `max(1, 1.4826*MAD)`.
+Positive-only aperture flux is not treated as a calibrated SNR. The target peak
+significance is 20 and peak headroom begins at 75% of 65535. Recommendations
+use approximately linear raw-level scaling and squared significance scaling
+for sky-dominated noise. Fixed camera bias, read noise and clipping weaken these
+approximations: clipping gives only a shorter trial, not recovered true flux.
+Exposure is bounded to 0.1..60 seconds. Forth accepts the selection recommendation
+as the baseline and resets to it at every bracket position; local trials do not
+change that baseline. These defaults require validation under the actual sky.
 
-`finish_computation` ends and frees the run, returning 0 or -1. Each usable
-star needs at least five distinct focus positions. Fit two least-squares
-linear branches, with at least two observations per branch, negative/positive
-slopes and their intersection bracketed between the inner branch samples.
-Each branch must rise by at least 0.5 pixel or 10% of the fitted minimum,
-whichever is larger, to reject nearly focus-independent sources.
-Choose the valid split with lowest residual sum of squares; do not extrapolate.
-Combine usable stellar focus estimates by their median. Return the rounded
-signed integer best focus and an unsigned integer uncertainty in focuser steps:
-the ceiling of the largest of one step, median propagated fit error, and
-1.4826 times the median absolute deviation between stellar focus estimates.
-This is a diagnostic, not a calibrated confidence interval. No usable fit
-returns -1 and leaves both outputs unchanged.
-These are aperture and curve-quality filters, not a galaxy classifier.
-Compact nuclei can resemble stellar profiles; offline checks do not establish
-reliable autofocus under every sky condition.
+`finish_computation` commits pending samples, ends and frees the run. Each star
+needs five distinct positions and whole-fit R² >= 0.8. The direct-HFD model is
+`sqrt(h² + [s*(position-f)]²)`, with positive h/s and f inside the sampled bracket.
+Repeated positions are averaged before fitting. No exposure-risk, saturation,
+roundness or empirical contrast filter enters this stage. Choose up to the
+requested number of valid curves in frozen selection rank, then combine their
+focuses by the median.
+
+E is the ceiling of the largest of one step, median individual focus standard
+errors, and `1.4826 * MAD` of the stellar focus estimates. Individual errors use
+the nonlinear-fit Jacobian covariance and residual variance with three fitted
+parameters. E is a local diagnostic, not a calibrated confidence interval or
+guarantee against systematic/model bias. A mathematically unavailable estimate
+returns -1, leaves focus unchanged and reports E=`UINT32_MAX`; Forth retains
+entry focus and continues. Only Forth gates an estimate by E (default <=50 steps).
+
+Numerical background: [NIST least squares](https://www.itl.nist.gov/div898/handbook/pmd/section4/pmd431.htm)
+and [Hocus Focus hyperbolic fitting](https://ghilios.github.io/hocus-focus/overview/hyperbola-fitting/).
+The agreed three-parameter symmetric model is simpler than Hocus Focus's
+four/five-parameter families; asymmetry can bias it. We do not adopt their
+extra robust weighting/outlier gates, preserving the sample-count/R² boundary.
 
 The curve module consumes only star records: it never invokes bitmap analysis,
 controls equipment, writes FITS metadata or decides whether to apply focus.
 Compile `native\focus_curve.c` with `native\test_focus_curve.c` alone for its
 synthetic regression. `AstroImagingInForth\capabilities\Autofocus.f` is the
 Forth caller: acquire through the existing pipeline, submit `FRAME_STARS`,
-retry exposure at the same position, and finish/apply or restore prior focus.
+select once, retain best bounded trials at each position, and finish/apply or
+retain entry focus according to E.
 
 This is a replacement API, not an adapter. The previous `IA_*` analysis and
 autofocus exports are removed. The legacy application autofocus script is no

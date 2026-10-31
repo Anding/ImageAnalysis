@@ -21,24 +21,19 @@ static void fill(uint16_t *pixels, unsigned count, uint16_t value)
 }
 
 static int analyze_background(uint16_t *pixels, unsigned width, unsigned height,
-    unsigned background, unsigned limit)
+    unsigned background)
 {
     int result;
     memset(stars, 0xa5, sizeof(stars));
-    result = AnalyzeStars(pixels, width, height, background, 0, limit, stars);
-    CHECK(result >= 0 && (unsigned)result <= limit);
+    result = AnalyzeStars(pixels, width, height, background, 0, stars);
+    CHECK(result >= 0 && result <= MAX_STARS);
     CHECK(stars[result].positive_pixel_count == 0);
     return result;
 }
 
-static int analyze_limit(uint16_t *pixels, unsigned width, unsigned height, unsigned limit)
-{
-    return analyze_background(pixels, width, height, 1000, limit);
-}
-
 static int analyze(uint16_t *pixels, unsigned width, unsigned height)
 {
-    return analyze_limit(pixels, width, height, MAX_STARS);
+    return analyze_background(pixels, width, height, 1000);
 }
 
 static void small_sources(void)
@@ -64,7 +59,7 @@ static void small_sources(void)
     saved = stars[0];
     CHECK(analyze(pixels, 64, 64) == 1);
     CHECK(memcmp(&saved, stars, sizeof(saved)) == 0);
-    CHECK(analyze_background(pixels, 64, 64, 1100, MAX_STARS) == 0);
+    CHECK(analyze_background(pixels, 64, 64, 1100) == 0);
 
     pixels[32 * 64 + 33] = 65535;
     CHECK(analyze(pixels, 64, 64) == 0); /* hot pixel with two weak neighbours */
@@ -92,9 +87,9 @@ static void small_sources(void)
     CHECK(analyze(pixels, 64, 64) == 1); /* aperture just touches x=0 */
 
     fill(pixels, 64 * 64, 65535);
-    CHECK(analyze_background(pixels, 64, 64, 65535, MAX_STARS) == 0);
+    CHECK(analyze_background(pixels, 64, 64, 65535) == 0);
     fill(pixels, 64 * 64, 0);
-    CHECK(analyze_background(pixels, 64, 64, 0, MAX_STARS) == 0);
+    CHECK(analyze_background(pixels, 64, 64, 0) == 0);
     CHECK(analyze(pixels, 1, 1) == 0);
 }
 
@@ -115,6 +110,9 @@ static void gaussian(void)
     NEAR(stars[0].qyy, 4, 0.02);
     NEAR(stars[0].qxy, 0, 0.01);
     NEAR(stars[0].hfd, 4 * sqrt(2 * log(2.0)), 0.25);
+    NEAR(stars[0].roundness, 1, 0.001);
+    CHECK(stars[0].over_exposed_risk == 0);
+    CHECK(stars[0].under_exposed_risk == 0);
 
     /* Exercise growth of the connected-component workspace beyond 1024 pixels. */
     fill(pixels, 128 * 128, 1000);
@@ -132,20 +130,22 @@ static void median_and_mad(void)
     fill(pixels, 64 * 64, 1000);
     for (i = 0; i < 3; ++i)
         pixels[indices[i]] = 1120;
-    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 20, 10, stars) == 0);
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 20, stars) == 0);
     for (i = 0; i < 3; ++i)
         pixels[indices[i]] = 1121;
-    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 20, 10, stars) == 1);
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 20, stars) == 1);
     NEAR(stars[0].flux, 363, 1e-12);
-    CHECK(AnalyzeStars(pixels, 64, 64, 1100, 20, 10, stars) == 0);
-    CHECK(AnalyzeStars(pixels, 64, 64, 1000, UINT32_MAX, 10, stars) == 0);
+    CHECK(stars[0].under_exposed_risk > 0.5);
+    CHECK(stars[0].exposure_scale > 1);
+    CHECK(AnalyzeStars(pixels, 64, 64, 1100, 20, stars) == 0);
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, UINT32_MAX, stars) == 0);
     CHECK(stars[0].positive_pixel_count == 0);
     for (i = 0; i < 3; ++i)
         pixels[indices[i]] = 1016;
-    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 2, 10, stars) == 0);
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 2, stars) == 0);
     for (i = 0; i < 3; ++i)
         pixels[indices[i]] = 1017;
-    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 2, 10, stars) == 1);
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 2, stars) == 1);
 }
 
 static void limit_and_independence(void)
@@ -173,7 +173,7 @@ static void limit_and_independence(void)
     for (x = 1; x < MAX_STARS; ++x)
         CHECK(stars[x - 1].flux > stars[x].flux);
     fill(pixels, WIDTH * WIDTH, 2000);
-    CHECK(AnalyzeStars(pixels, WIDTH, WIDTH, 2000, 0, 10, other) == 0);
+    CHECK(AnalyzeStars(pixels, WIDTH, WIDTH, 2000, 0, other) == 0);
     NEAR(stars[255].y, 64, 1e-12); /* no process-global result storage */
     free(pixels);
 }
@@ -199,33 +199,25 @@ static void selection_and_order(void)
     source(pixels, WIDTH, 112, 32, 200);
     source(pixels, WIDTH, 64, 96, 300);
     source(pixels, WIDTH, 8, 96, 1000); /* bright edge candidate is omitted */
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 1) == 1);
+    CHECK(analyze(pixels, WIDTH, HEIGHT) == 3);
     NEAR(stars[0].x, 64, 1e-12);
     NEAR(stars[0].y, 96, 1e-12);
     memset(&guard, 0xa5, sizeof(guard));
-    CHECK(memcmp(stars + 2, &guard, sizeof(guard)) == 0);
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 2) == 2);
+    CHECK(memcmp(stars + 4, &guard, sizeof(guard)) == 0);
     NEAR(stars[0].flux, 1800, 1e-12);
     NEAR(stars[1].flux, 1200, 1e-12);
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 10) == 3);
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 0) == 0);
-    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 0, 257, stars) == -1);
-    CHECK(stars[0].positive_pixel_count == 0);
 
     /* Equal discovery/measured flux: X precedes Y, even at the selection cut. */
     fill(pixels, WIDTH * HEIGHT, 1000);
     source(pixels, WIDTH, 112, 32, 100);
     source(pixels, WIDTH, 32, 32, 100);
     source(pixels, WIDTH, 32, 96, 100);
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 3) == 3);
+    CHECK(analyze(pixels, WIDTH, HEIGHT) == 3);
     NEAR(stars[0].x, 32, 1e-12);
     NEAR(stars[0].y, 32, 1e-12);
     NEAR(stars[1].x, 32, 1e-12);
     NEAR(stars[1].y, 96, 1e-12);
     NEAR(stars[2].x, 112, 1e-12);
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 2) == 2);
-    NEAR(stars[1].x, 32, 1e-12);
-    NEAR(stars[1].y, 96, 1e-12);
 
     /* Sub-threshold wings can reverse measured flux, but not candidate selection. */
     fill(pixels, WIDTH * HEIGHT, 1000);
@@ -234,9 +226,7 @@ static void selection_and_order(void)
             pixels[y * WIDTH + x] = 1010;
     source(pixels, WIDTH, 32, 32, 100);
     source(pixels, WIDTH, 112, 32, 110);
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 1) == 1);
-    NEAR(stars[0].x, 112, 1e-12);
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 2) == 2);
+    CHECK(analyze(pixels, WIDTH, HEIGHT) == 2);
     NEAR(stars[0].x, 32, 1e-12);
     NEAR(stars[0].flux, 1360, 1e-12);
     NEAR(stars[1].flux, 660, 1e-12);
@@ -260,12 +250,12 @@ static void contaminated_candidates(void)
                 3000 * exp(-(dx * dx + dy * dy) / 32));
         }
     }
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 1) == 1);
+    CHECK(analyze(pixels, WIDTH, HEIGHT) == 1);
     NEAR(stars[0].x, 152, 0.01);
     NEAR(stars[0].y, 144, 0.01);
     CHECK(stars[0].hfd > 8 && stars[0].hfd < 11); /* retain defocused stars */
 
-    /* A resolved clipped source must not crowd out the fainter usable star. */
+    /* Clipping is reported as risk, not used as a detector rejection cutoff. */
     for (y = 24; y < 72; ++y) {
         for (x = 88; x < 136; ++x) {
             double dx = (double)x - 112, dy = (double)y - 48;
@@ -273,11 +263,11 @@ static void contaminated_candidates(void)
                 100000 * exp(-(dx * dx + dy * dy) / 8));
         }
     }
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 1) == 1);
-    NEAR(stars[0].x, 152, 0.01);
-    CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 2) == 2);
+    CHECK(analyze(pixels, WIDTH, HEIGHT) == 2);
     CHECK(stars[0].saturated_pixel_count > 3);
     CHECK(stars[1].saturated_pixel_count == 0);
+    CHECK(stars[0].over_exposed_risk == 1);
+    CHECK(stars[0].exposure_scale < 1);
 
     /* Supplied MAD gives a 192-ADU threshold without changing the median. */
     for (y = 0; y < HEIGHT; ++y)
@@ -290,7 +280,7 @@ static void contaminated_candidates(void)
                 exp(-(dx * dx + dy * dy) / 8));
         }
     }
-    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 32, 1, stars) == 1);
+    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 32, stars) == 1);
     NEAR(stars[0].x, 152, 0.2);
     NEAR(stars[0].y, 144, 0.2);
     CHECK(stars[1].positive_pixel_count == 0);
@@ -298,15 +288,17 @@ static void contaminated_candidates(void)
 
 int main(void)
 {
-    CHECK(sizeof(StarRecord) == 72 && offsetof(StarRecord, x) == 8);
+    CHECK(sizeof(StarRecord) == 104 && offsetof(StarRecord, x) == 8);
     CHECK(offsetof(StarRecord, max_pixel) == 64);
+    CHECK(offsetof(StarRecord, roundness) == 72);
+    CHECK(offsetof(StarRecord, exposure_scale) == 96);
     small_sources();
     gaussian();
     median_and_mad();
     limit_and_independence();
     selection_and_order();
     contaminated_candidates();
-    CHECK(AnalyzeStars(NULL, 64, 64, 1000, 0, 10, stars) == -1);
+    CHECK(AnalyzeStars(NULL, 64, 64, 1000, 0, stars) == -1);
     CHECK(stars[0].positive_pixel_count == 0);
     puts("Star analysis native regression passed");
     return 0;

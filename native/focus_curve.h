@@ -8,31 +8,35 @@
 extern "C" {
 #endif
 
-/* Reset the previous run. Follow up to max_stars (1..256); return 0 or -1. */
+/* Reset the previous run. max_stars is the requested final fit count (1..256). */
 EXPORT int CALL start_computation(uint32_t max_stars);
 
 /*
- * Copy matched HFDs from a zero-terminated StarRecord list.
- * focus_position: signed integer focuser steps. exposure: unsigned microseconds.
- * 0: accepted; 1: all usable matches clipped; -1: no usable sample/other failure.
- * Defaults in analysis_parameters.h require HFD in 1..16 pixels and at most
- * three saturated pixels. Clipped stars are omitted when other stars remain.
- * No raw-peak brightness target.
- * Unused tracking slots may acquire later detections, without reassigning
- * missing identities. Clipped detections do not hide nearby usable matches.
- * With default parameters, 1 halves exposure (minimum 100 ms), without adding
- * a sample or updating tracking: retry at the same focus.
- * Other returns leave exposure unchanged.
- * Input records can be reused/freed immediately. Keep ROI and binning fixed.
+ * Freeze the ranked identity pool from the first frame and set its exposure
+ * baseline. Saturation is not an admission gate. Returns 0 on selection and
+ * -1 for invalid inputs or an empty selection. Called once per run.
+ */
+EXPORT int CALL select_focus_stars(const StarRecord *stars, uint32_t *exposure);
+
+/*
+ * Stage this exposure trial for a focus position. High-risk positive finite
+ * HFDs remain eligible samples; risks only guide exposure and trial choice.
+ * 0: no useful exposure change; 1: wrote a recommended exposure; -1: invalid
+ * input or no matched sample. Better trials replace worse trials until the
+ * point is finished. Exposure is bounded by the configured minimum/maximum.
+ * Inputs may be reused immediately. Keep ROI and binning fixed.
  */
 EXPORT int CALL add_focus_point(const StarRecord *stars, int32_t focus_position,
     uint32_t *exposure);
 
+/* Commit the best staged trial and clear its state; -1 if no trial has evidence. */
+EXPORT int CALL finish_focus_point(void);
+
 /*
  * End the run and release its samples, on success or failure.
- * 0: write best_focus and error in integer focuser steps.
- * -1: insufficient/invalid fit or another failure; outputs remain unchanged.
- * error is a fit-quality diagnostic, not a calibrated confidence interval.
+ * Commits a pending trial. 0 writes the best_focus and fit uncertainty in
+ * integer focuser steps. -1 leaves best_focus unchanged and writes UINT32_MAX
+ * to error when available. Error is not a calibrated real-world guarantee.
  */
 EXPORT int CALL finish_computation(int32_t *best_focus, uint32_t *error);
 

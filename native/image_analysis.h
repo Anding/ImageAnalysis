@@ -27,6 +27,10 @@ typedef struct StarRecord {
     double hfd;                   /* pixels */
     double qxx, qyy, qxy;          /* central second moments, pixels squared */
     uint16_t max_pixel;            /* raw sample; six bytes of tail padding */
+    double roundness;              /* minor/major moment-axis width, 0..1 */
+    double over_exposed_risk;       /* soft peak-headroom risk, 0..1 */
+    double under_exposed_risk;      /* soft peak-significance risk, 0..1 */
+    double exposure_scale;          /* calculated multiplier; clipping only gives a trial */
 } StarRecord;
 #pragma pack(pop)
 
@@ -36,17 +40,17 @@ typedef struct StarRecord {
  * C calculates the signal threshold from analysis_parameters.h:
  * max(MIN_SIGNAL_INCREMENT_ADU, MAD_MULTIPLIER * mad), above median.
  * The fifth argument is raw MAD, not a precomputed threshold.
- * max_stars: 0..MAX_STARS; with default parameters, prefer candidates with at most
- * three saturated pixels, then select by discovery flux after rejecting invalid apertures and HFD
- * outside 1..16 pixels. No deblending or galaxy classification:
+ * Return up to MAX_STARS; retain by discovery flux on overflow, with no clipping
+ * cutoff. Reject invalid apertures and HFD outside the configured range.
+ * No deblending or galaxy classification:
  * compact galaxy nuclei can resemble stars and require focus-curve validation.
  * stars: space for MAX_STARS records plus a zero terminator.
  * Records sort by measured flux descending, then x ascending, then y ascending.
- * Returns the count (0..max_stars), -1 for invalid inputs, -2 for allocation failure.
+ * Returns the count (0..MAX_STARS), -1 for invalid inputs, -2 for allocation failure.
  * On error the output list is empty. Inputs are never modified.
  */
 EXPORT int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
-    uint32_t height, uint32_t median, uint32_t mad, uint32_t max_stars,
+    uint32_t height, uint32_t median, uint32_t mad,
     StarRecord *stars);
 
 #ifdef __cplusplus

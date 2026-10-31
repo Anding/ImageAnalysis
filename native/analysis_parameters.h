@@ -15,21 +15,35 @@
 #define RADIAL_BINS_PER_PIXEL 16        /* Positive integer; HFD radial resolution. */
 #define MIN_HFD_PIXELS 1.0              /* Reject single-pixel/hot-pixel profiles. */
 #define MAX_HFD_PIXELS 16.0             /* Retain defocused stars, reject broad sources. */
-#define MAX_SATURATED_PIXELS 3          /* Raw pixels equal to 65535 per aperture. */
-
-/* Autofocus: centroid tracking and minimum evidence for a bracketed V curve. */
+/* Selection weights are preferences, not probabilities or shape rejection gates. */
+#define ROUNDNESS_WEIGHT 0.5
+#define BRIGHTNESS_WEIGHT 0.5
+#define DUPLICATE_RADIUS_PIXELS 1.0     /* Suppress coincident measured identities. */
 #define MATCH_RADIUS_PIXELS 8.0
-#define MIN_FOCUS_POSITIONS 5           /* At least five, for positive fit degrees of freedom. */
-#define MIN_BRANCH_POINTS 2            /* At least two observations per fitted line. */
-#define MIN_BRANCH_RISE_PIXELS 0.5
-#define MIN_BRANCH_RISE_FRACTION 0.1    /* Fraction of fitted minimum HFD; 0.1 is 10%. */
 
-/* Exposure guidance applies only when no usable match survives clipping. */
-#define EXPOSURE_REDUCTION_DIVISOR 2    /* Integer greater than one. */
-#define MIN_EXPOSURE_US 100000          /* Recommended exposure floor, in microseconds. */
+/* Exposure heuristics: peak significance is not a calibrated stellar SNR.
+ * MAD -> Gaussian sigma; with sky-dominated noise significance grows as sqrt(t).
+ * Linear raw-level scaling assumes negligible fixed bias. Clipping requires trials.
+ */
+#define TARGET_PEAK_SIGMA 20.0
+#define MIN_NOISE_ADU 1.0
+#define SAFE_PEAK_FRACTION 0.75         /* Raw full-scale headroom starts the soft risk. */
+#define TARGET_PEAK_FRACTION 0.5        /* Selection-frame baseline target. */
+#define AF_EXPOSURE_TOP_STARS 32
+#define MAX_EXPOSURE_RISK 0.5
+#define MIN_EXPOSURE_CHANGE_FRACTION 0.05
+#define MIN_EXPOSURE_US 100000
+#define MAX_EXPOSURE_US 60000000
 
-#if MIN_FOCUS_POSITIONS < 5 || MIN_BRANCH_POINTS < 2
-#error Focus fitting requires at least five positions and two points per branch.
+/* Direct three-parameter hyperbola fit; only distinct count and R² filter quality. */
+#define MIN_FOCUS_POSITIONS 5
+#define MIN_FIT_R_SQUARED 0.8
+#define FIT_MAX_ITERATIONS 100
+#define FIT_RELATIVE_TOLERANCE 1e-9
+#define FIT_INITIAL_DAMPING 1e-3
+
+#if MIN_FOCUS_POSITIONS < 4
+#error Three-parameter fit needs positive residual degrees of freedom.
 #endif
 
 #endif

@@ -1,7 +1,9 @@
-/* Link with focus_curve.c alone: no bitmap analyzer or equipment dependencies. */
 #include "focus_curve.h"
+#include "analysis_parameters.h"
 
 #include <math.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,391 +14,477 @@
 
 static StarRecord records[MAX_STARS + 1];
 
-static StarRecord star(double x, double y, double hfd, uint16_t peak)
+static StarRecord star(double x, double y, double hfd, double flux,
+    double roundness, double over, double under, double scale)
 {
     StarRecord result = {0};
     result.positive_pixel_count = 10;
     result.x = x;
     result.y = y;
     result.hfd = hfd;
-    result.flux = 100000;
-    result.max_pixel = peak;
+    result.flux = flux;
+    result.roundness = roundness;
+    result.over_exposed_risk = over;
+    result.under_exposed_risk = under;
+    result.exposure_scale = scale;
     return result;
 }
 
-static double vcurve(double position, double focus)
+static double hyperbola(double position, double focus)
 {
-    return 2 + (position < focus ? 0.02 * (focus - position) :
-                                  0.03 * (position - focus));
+    double offset = 0.02 * (position - focus);
+    return sqrt(2.0 * 2.0 + offset * offset);
 }
 
-static void failed_finish(void)
+static void reset_records(void)
 {
-    int32_t focus = -123;
-    uint32_t error = 456;
-    CHECK(finish_computation(&focus, &error) == -1);
-    CHECK(focus == -123 && error == 456);
+    memset(records, 0, sizeof(records));
 }
 
-static void lifecycle(void)
+static void select_one(double x, uint32_t *exposure)
+{
+    reset_records();
+    records[0] = star(x, 32, 5, 100000, 1, 0, 0, 1);
+    CHECK(start_computation(1) == 0);
+    CHECK(select_focus_stars(records, exposure) == 0);
+}
+
+static void add_and_commit(int32_t position, double hfd, double over,
+    double under, double scale, int expected_status)
 {
     uint32_t exposure = 1000000;
-    memset(records, 0, sizeof(records));
-    CHECK(add_focus_point(records, 5000, &exposure) == -1);
-    failed_finish();
+    reset_records();
+    records[0] = star(32, 32, hfd, 100000, 1, over, under, scale);
+    CHECK(add_focus_point(records, position, &exposure) == expected_status);
+    CHECK(finish_focus_point() == 0);
+}
+
+static void require_failed_fit(void)
+{
+    int32_t focus = -123456;
+    uint32_t error = 0;
+    int status = finish_computation(&focus, &error);
+    CHECK(status == -1);
+    CHECK(focus == -123456);
+    CHECK(error == UINT32_MAX);
+}
+
+static void layout_and_lifecycle(void)
+{
+    uint32_t exposure = 1000000;
+    int32_t focus = 20;
+    uint32_t error = 0;
+    CHECK(sizeof(StarRecord) == 104);
+    CHECK(offsetof(StarRecord, roundness) == 72);
+    CHECK(offsetof(StarRecord, over_exposed_risk) == 80);
+    CHECK(offsetof(StarRecord, under_exposed_risk) == 88);
+    CHECK(offsetof(StarRecord, exposure_scale) == 96);
+    CHECK(add_focus_point(records, 0, &exposure) == -1);
     CHECK(start_computation(0) == -1);
     CHECK(start_computation(MAX_STARS + 1) == -1);
     CHECK(start_computation(1) == 0);
-    CHECK(add_focus_point(records, 5000, &exposure) == -1);
-    records[0] = star(32, 32, 5, 30000);
-    CHECK(add_focus_point(records, 5000, NULL) == -1);
-    CHECK(add_focus_point(NULL, 5000, &exposure) == -1);
-    exposure = 0;
-    CHECK(add_focus_point(records, 5000, &exposure) == -1);
-    exposure = 1000000;
-    records[0].hfd = NAN;
-    CHECK(add_focus_point(records, 5000, &exposure) == -1);
-    records[0].hfd = 5;
-    CHECK(add_focus_point(records, 5000, &exposure) == 0);
-    CHECK(start_computation(1) == 0); /* replaces, rather than appends to, a run */
-    failed_finish();
-    CHECK(add_focus_point(records, 5000, &exposure) == -1);
+    CHECK(select_focus_stars(records, &exposure) == -1);
+    CHECK(select_focus_stars(records, &exposure) == -1);
+    CHECK(add_focus_point(records, 0, &exposure) == -1);
+    CHECK(finish_computation(&focus, &error) == -1);
+    CHECK(focus == 20 && error == UINT32_MAX);
     CHECK(start_computation(1) == 0);
-    CHECK(finish_computation(NULL, NULL) == -1);
-    failed_finish();
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0, 1);
+    CHECK(select_focus_stars(records, NULL) == -1);
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    CHECK(add_focus_point(NULL, 0, &exposure) == -1);
+    CHECK(add_focus_point(records, 0, NULL) == -1);
+    CHECK(finish_focus_point() == -1);
+    require_failed_fit();
 }
 
-static void exposure_guidance(void)
+static void selection_ranking_and_duplicates(void)
+{
+    uint32_t exposure = 1000000;
+    int i;
+    CHECK(start_computation(1) == 0);
+    reset_records();
+    records[0] = star(10, 32, 5, 1000, 0.1, 0, 0, 1);  /* bright, poor roundness */
+    records[1] = star(50, 32, 5, 300, 1.0, 0, 0, 1);   /* weighted winner */
+    records[2] = star(90, 32, 5, 100, 0.5, 0, 0, 1);
+    records[3] = star(50.5, 32, 5, 100000, 1.0, 0, 0, 1); /* later duplicate */
+    records[0].saturated_pixel_count = 100;
+    records[1].saturated_pixel_count = 100;
+    records[2].saturated_pixel_count = 100;
+    records[3].saturated_pixel_count = 100;
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    for (i = 0; i < 7; ++i) {
+        int32_t position = 4700 + i * 100;
+        reset_records();
+        records[0] = star(10, 32, hyperbola(position, 5000), 1000, 0.1, 0, 0, 1);
+        records[1] = star(50, 32, hyperbola(position, 5100), 300, 1.0, 0, 0, 1);
+        records[2] = star(90, 32, hyperbola(position, 5200), 100, 0.5, 0, 0, 1);
+        records[3] = star(50.5, 32, 18, 100000, 1.0, 0, 0, 1);
+        records[0].saturated_pixel_count = 100;
+        records[1].saturated_pixel_count = 100;
+        records[2].saturated_pixel_count = 100;
+        records[3].saturated_pixel_count = 100;
+        CHECK(add_focus_point(records, position, &exposure) == 0);
+        CHECK(finish_focus_point() == 0);
+    }
+    {
+        int32_t focus = 0;
+        uint32_t error = UINT32_MAX;
+        CHECK(finish_computation(&focus, &error) == 0);
+        CHECK(focus == 5100);
+        CHECK(error == 1);
+    }
+}
+
+static void selection_only_no_recruitment(void)
+{
+    uint32_t exposure = 1000000;
+    int i;
+    CHECK(start_computation(1) == 0);
+    reset_records();
+    records[0] = star(10, 10, 5, 100000, 1, 0, 0, 1);
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    for (i = 0; i < 7; ++i) {
+        int32_t position = 4700 + i * 100;
+        reset_records();
+        records[0] = star(100, 100, hyperbola(position, 5000),
+            100000, 1, 0, 0, 1);
+        CHECK(add_focus_point(records, position, &exposure) == -1);
+        CHECK(finish_focus_point() == -1);
+    }
+    require_failed_fit();
+}
+
+static void exposure_guidance_and_bounds(void)
 {
     uint32_t exposure;
-    int i;
-    memset(records, 0, sizeof(records));
+    int status;
     CHECK(start_computation(1) == 0);
-    records[0] = star(32, 32, 5, 60000);
-    exposure = 1000000;
-    CHECK(add_focus_point(records, 5000, &exposure) == 0);
-    CHECK(exposure == 1000000);
-    records[0].max_pixel = 5000;
-    exposure = 1000000;
-    CHECK(add_focus_point(records, 5000, &exposure) == 0);
-    CHECK(exposure == 1000000);
-    records[0].max_pixel = 65535;
-    exposure = 1000000;
-    CHECK(add_focus_point(records, 5000, &exposure) == 0);
-    CHECK(exposure == 1000000);
-    records[0].max_pixel = 30000;
-    records[0].saturated_pixel_count = 1;
-    exposure = 1000000;
-    CHECK(add_focus_point(records, 5000, &exposure) == 0);
-    CHECK(exposure == 1000000);
-    records[0].saturated_pixel_count = 0;
-    records[0].max_pixel = 5000;
-    exposure = UINT32_MAX;
-    CHECK(add_focus_point(records, 5000, &exposure) == 0);
-    CHECK(exposure == UINT32_MAX);
-    records[0].max_pixel = 65535;
-    records[0].saturated_pixel_count = 4;
-    exposure = 1;
-    CHECK(add_focus_point(records, 5000, &exposure) == -1);
-    CHECK(exposure == 1);
-    exposure = 150000;
-    CHECK(add_focus_point(records, 5000, &exposure) == 1);
-    CHECK(exposure == 100000);
-    CHECK(add_focus_point(records, 5000, &exposure) == -1);
-    CHECK(exposure == 100000);
-    failed_finish(); /* repeated positions cannot form a focus curve */
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0.8, 2);
+    exposure = 500000;
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    CHECK(exposure == 1000000); /* baseline uses the detector scale */
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0.8, 2);
+    status = add_focus_point(records, 5000, &exposure);
+    CHECK(status == 1 && exposure == 2000000);
+    CHECK(finish_focus_point() == 0);
+    require_failed_fit();
 
     CHECK(start_computation(1) == 0);
-    for (i = 0; i < 4; ++i) {
-        int32_t position = 4800 + 100 * i;
-        records[0] = star(32, 32, vcurve(position, 4950), i % 2 ? 10000 : 50000);
-        exposure = 1000000;
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-        CHECK(exposure == 1000000);
-    }
-    /* A rejected fifth position still leaves too few accepted positions. */
-    records[0] = star(32, 32, 12, 60000);
-    records[0].saturated_pixel_count = 4;
-    CHECK(add_focus_point(records, 5200, &exposure) == 1);
-    failed_finish();
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0, 1);
+    exposure = MAX_EXPOSURE_US + 1u;
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    CHECK(exposure == (uint32_t)MAX_EXPOSURE_US);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0.9, 0, 0.001);
+    CHECK(add_focus_point(records, 5000, &exposure) == 1);
+    CHECK(exposure == (uint32_t)MIN_EXPOSURE_US);
+    CHECK(finish_focus_point() == 0);
+    require_failed_fit();
+
+    CHECK(start_computation(1) == 0);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0, 0.001);
+    exposure = MAX_EXPOSURE_US + 1u;
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    CHECK(exposure == (uint32_t)MIN_EXPOSURE_US);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0, 1);
+    CHECK(add_focus_point(records, 5000, &exposure) == 0);
+    CHECK(exposure == (uint32_t)MIN_EXPOSURE_US);
+    CHECK(finish_focus_point() == 0);
+    require_failed_fit();
+
+    CHECK(start_computation(1) == 0);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0, 1);
+    exposure = 1000000;
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0, 0.5);
+    CHECK(add_focus_point(records, 5000, &exposure) == 0);
+    CHECK(exposure == 1000000); /* healthy stars do not chase scale changes */
+    CHECK(finish_focus_point() == 0);
+    require_failed_fit();
+
+    CHECK(start_computation(2) == 0);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0.9, 2);
+    records[1] = star(80, 32, 5, 100000, 1, 0.7, 0, 0.5);
+    exposure = 1000000;
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0.9, 2);
+    records[1] = star(80, 32, 5, 100000, 1, 0.7, 0, 0.5);
+    CHECK(add_focus_point(records, 5000, &exposure) == 1);
+    CHECK(exposure > 1000000); /* mixed advice follows stronger under-risk coverage */
+    CHECK(finish_focus_point() == 0);
+    require_failed_fit();
 }
 
-static void single_star(double wanted, int32_t centre)
+static void exposure_top_count_tracks_requested_limit(void)
 {
-    int32_t focus;
-    uint32_t error, exposure = 1000000;
+    uint32_t exposure = 1000000;
+    int i;
+    CHECK(start_computation(33) == 0);
+    reset_records();
+    for (i = 0; i < 40; ++i)
+        records[i] = star(20.0 + 20.0 * i, 32, 5, 100000, 1, 0, 0, 1);
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    CHECK(exposure == 1000000);
+    reset_records();
+    for (i = 0; i < 33; ++i)
+        records[i] = star(20.0 + 20.0 * i, 32, 5, 100000, 1, 0, 0, 1);
+    records[32].under_exposed_risk = 0.9;
+    records[32].exposure_scale = 2;
+    CHECK(add_focus_point(records, 5000, &exposure) == 1);
+    CHECK(exposure == 2000000); /* the 33rd necessary star participates */
+    CHECK(finish_focus_point() == 0);
+    require_failed_fit();
+}
+
+static void best_trial_and_high_risk_samples(void)
+{
+    uint32_t exposure = 1000000;
     int i;
     CHECK(start_computation(1) == 0);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0, 1);
+    CHECK(select_focus_stars(records, &exposure) == 0);
     for (i = 0; i < 7; ++i) {
-        int32_t position = centre - 300 + i * 100;
-        memset(records, 0, sizeof(records));
-        records[0] = star(32 + i * 0.25, 32, vcurve(position, wanted), 30000);
-        if (i == 3) {
-            uint32_t retry_exposure = exposure;
-            records[0].max_pixel = 65535;
-            records[0].saturated_pixel_count = 4;
-            records[0].hfd = 12; /* would spoil the curve if stored */
-            CHECK(add_focus_point(records, position, &retry_exposure) == 1);
-            records[0].max_pixel = 30000;
-            records[0].saturated_pixel_count = 0;
-            records[0].hfd = vcurve(position, wanted);
-        }
+        int32_t position = 4700 + i * 100;
+        double good = hyperbola(position, 5000);
+        reset_records();
+        records[0] = star(32, 32, good, 100000, 1, 0.6, 0, 0.5);
+        CHECK(add_focus_point(records, position, &exposure) >= 0);
+        reset_records();
+        records[0] = star(32, 32, 18, 100000, 1, 0.9, 0, 0.5);
+        CHECK(add_focus_point(records, position, &exposure) >= 0);
+        CHECK(finish_focus_point() == 0);
+    }
+    {
+        int32_t focus = 0;
+        uint32_t error = UINT32_MAX;
+        CHECK(finish_computation(&focus, &error) == 0);
+        CHECK(focus == 5000);
+        CHECK(error == 1);
+    }
+
+    CHECK(start_computation(1) == 0);
+    reset_records();
+    records[0] = star(32, 32, 5, 100000, 1, 0, 0, 1);
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    for (i = 0; i < 7; ++i) {
+        int32_t position = 4700 + i * 100;
+        add_and_commit(position, hyperbola(position, 5100), 0.8, 0, 0.5, 1);
+    }
+    {
+        int32_t focus = 0;
+        uint32_t error = UINT32_MAX;
+        CHECK(finish_computation(&focus, &error) == 0);
+        CHECK(focus == 5100); /* high-risk finite samples are not filtered */
+    }
+}
+
+static void missing_and_ambiguous_matches(void)
+{
+    uint32_t exposure = 1000000;
+    int i;
+    CHECK(start_computation(1) == 0);
+    reset_records();
+    records[0] = star(20, 32, 5, 100000, 1, 0, 0, 1);
+    records[1] = star(40, 32, 5, 90000, 0.9, 0, 0, 1);
+    CHECK(select_focus_stars(records, &exposure) == 0);
+    reset_records();
+    records[0] = star(30, 32, 5, 100000, 1, 0, 0, 1);
+    CHECK(add_focus_point(records, 4600, &exposure) == -1);
+    CHECK(finish_focus_point() == -1);
+    for (i = 0; i < 7; ++i) {
+        int32_t position = 4700 + i * 100;
+        reset_records();
+        records[0] = star(40, 32, hyperbola(position, 5100),
+            90000, 0.9, 0, 0, 1);
+        if (i != 2)
+            records[1] = star(20, 32, hyperbola(position, 5000),
+                100000, 1, 0, 0, 1);
         CHECK(add_focus_point(records, position, &exposure) == 0);
-        memset(records, 0, sizeof(records)); /* the computation owns its samples */
+        CHECK(finish_focus_point() == 0);
+    }
+    {
+        int32_t focus = 0;
+        uint32_t error = UINT32_MAX;
+        CHECK(finish_computation(&focus, &error) == 0);
+        CHECK(focus == 5000); /* higher-quality identity remains first */
+        CHECK(error == 1);
+    }
+}
+
+static void empty_point_does_not_commit(void)
+{
+        uint32_t exposure = 1000000;
+        int32_t focus = -17;
+        uint32_t error = 0;
+        CHECK(start_computation(1) == 0);
+        reset_records();
+        records[0] = star(32, 32, 5, 100000, 1, 0, 0, 1);
+        CHECK(select_focus_stars(records, &exposure) == 0);
+        reset_records();
+        records[0] = star(100, 100, 5, 100000, 1, 0, 0, 1);
+        CHECK(add_focus_point(records, 5100, &exposure) == -1);
+        CHECK(finish_focus_point() == -1);
+        CHECK(finish_computation(&focus, &error) == -1);
+        CHECK(focus == -17 && error == UINT32_MAX);
+
+        CHECK(start_computation(1) == 0);
+        reset_records();
+        records[0] = star(32, 32, 5, 100000, 1, 0, 0, 1);
+        CHECK(select_focus_stars(records, &exposure) == 0);
+        reset_records();
+        records[0] = star(32, 32, hyperbola(5000, 5000), 100000, 1, 0, 0, 1);
+        CHECK(add_focus_point(records, 5000, &exposure) == 0);
+        reset_records();
+        records[0] = star(100, 100, 5, 100000, 1, 0, 0, 1);
+        CHECK(add_focus_point(records, 5000, &exposure) == -1);
+        CHECK(finish_focus_point() == 0); /* failed retries leave the best staged trial */
+        require_failed_fit();
+}
+
+static void focus_spread_uncertainty(void)
+{
+        uint32_t exposure = 1000000, error = 0;
+        int32_t focus = 0;
+        int i, j;
+        CHECK(start_computation(7) == 0);
+        reset_records();
+        for (j = 0; j < 7; ++j)
+            records[j] = star(20 + 20 * j, 32, 5, 100000, 1, 0, 0, 1);
+        CHECK(select_focus_stars(records, &exposure) == 0);
+        for (i = 0; i < 9; ++i) {
+            int32_t position = 4610 + i * 100;
+            reset_records();
+            for (j = 0; j < 7; ++j) {
+                double centre = 5010 + (j - 3) * 20;
+                records[j] = star(20 + 20 * j, 32,
+                    hyperbola(position, centre), 100000, 1, 0, 0, 1);
+            }
+            CHECK(add_focus_point(records, position, &exposure) == 0);
+            CHECK(finish_focus_point() == 0);
+        }
+        CHECK(finish_computation(&focus, &error) == 0);
+        CHECK(focus == 5010);
+        CHECK(error == 60); /* MAD is 40 steps; 1.4826 * 40 rounds up to 60. */
+}
+
+static void direct_hyperbola_and_uncertainty(int32_t centre)
+{
+    static const double noise[] = {0.05, -0.07, 0.02, 0.08, -0.04, 0.03, -0.02, 0.06, -0.05};
+    uint32_t exposure = 1000000, error = 0;
+    int32_t focus = 0;
+    int i;
+    select_one(32, &exposure);
+    for (i = 0; i < 9; ++i) {
+        int32_t position = centre - 400 + i * 100;
+        add_and_commit(position, hyperbola(position, centre) + noise[i],
+            0, 0, 1, 0);
     }
     CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == (int32_t)round(wanted));
-    CHECK(error == 1);
-    failed_finish();
+    CHECK(llabs((long long)focus - centre) <= 10);
+    CHECK(error > 1); /* Jacobian covariance includes the noisy residuals. */
 }
 
-static void reordered_identities(void)
+static void count_r2_and_repeated_positions(void)
 {
-    int32_t focus;
-    uint32_t error, exposure = 1000000;
-    int i, j;
-    CHECK(start_computation(3) == 0);
-    for (i = 0; i < 9; ++i) {
-        int32_t position = 4600 + 100 * i;
-        memset(records, 0, sizeof(records));
-        for (j = 0; j < 3; ++j) {
-            int index = i % 2 ? 2 - j : j;
-            records[index] = star(32 + j * 40 + i * 0.2, 40,
-                vcurve(position, 4990 + j * 10), 30000);
-        }
-        CHECK(add_focus_point(records, position, &exposure) == 0);
+    uint32_t exposure = 1000000, error = 0;
+    int32_t focus = 0;
+    int i;
+    select_one(32, &exposure);
+    for (i = 0; i < 4; ++i)
+        add_and_commit(4800 + i * 100, hyperbola(4800 + i * 100, 4950),
+            0, 0, 1, 0);
+    require_failed_fit();
+
+    select_one(32, &exposure);
+    for (i = 0; i < 5; ++i) {
+        int32_t position = 4800 + i * 100;
+        add_and_commit(position, hyperbola(position, 5000), 0, 0, 1, 0);
     }
     CHECK(finish_computation(&focus, &error) == 0);
     CHECK(focus == 5000);
-    CHECK(error == 15); /* ceil(1.4826 * 10), not zero from individually exact fits */
-}
 
-static void missing_and_ambiguous(void)
-{
-    int32_t focus;
-    uint32_t error, exposure = 1000000;
-    int i;
-    CHECK(start_computation(2) == 0);
-    memset(records, 0, sizeof(records));
-    records[0] = star(32, 32, vcurve(4700, 5000), 30000);
-    records[1] = star(36, 32, vcurve(4700, 5100), 30000);
-    CHECK(add_focus_point(records, 4700, &exposure) == 0);
-    memset(records, 0, sizeof(records));
-    records[0] = star(34, 32, 5, 5000); /* equally near both known identities */
-    CHECK(add_focus_point(records, 4800, &exposure) == -1);
-    CHECK(exposure == 1000000); /* ambiguity is not underexposure */
-    records[0] = star(100, 32, 5, 5000); /* outside tracking radius */
-    CHECK(add_focus_point(records, 4800, &exposure) == -1);
-    for (i = 0; i < 7; ++i) {
-        int32_t position = 4800 + 100 * i;
-        memset(records, 0, sizeof(records));
-        records[0] = star(150, 32, 50, 65535); /* untracked: do not use for exposure */
-        records[1] = star(36, 32, vcurve(position, 5100), 30000);
-        CHECK(add_focus_point(records, position, &exposure) == 0);
+    select_one(32, &exposure);
+    for (i = 0; i < 5; ++i) {
+        int32_t position = 4800 + i * 100;
+        add_and_commit(position, hyperbola(position, 5000), 0, 0, 1, 0);
     }
+    add_and_commit(5000, 2.0, 0, 0, 1, 0);
+    add_and_commit(5000, 2.2, 0, 0, 1, 0);
+    add_and_commit(5000, 1.8, 0, 0, 1, 0);
     CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == 5100 && error == 1); /* star 1 never became missing star 0 */
+    CHECK(focus == 5000); /* repeated center frames average to one position */
+
+    select_one(32, &exposure);
+    for (i = 0; i < 7; ++i)
+        add_and_commit(4700 + i * 100, 3.0 + ((i * 7) % 4) * 2.0,
+            0, 0, 1, 0);
+    require_failed_fit(); /* low R-squared */
+
+    select_one(32, &exposure);
+    for (i = 0; i < 7; ++i)
+        add_and_commit(4700 + i * 100, 5.0, 0, 0, 1, 0);
+    require_failed_fit(); /* flat, unidentifiable curve */
 }
 
-static void retry_tracking(void)
+static void final_limit_and_empty_errors(void)
 {
-    uint32_t exposure = 1000000;
-    memset(records, 0, sizeof(records));
+    uint32_t exposure = 1000000, error = 0;
+    int32_t focus = 0;
+    int i;
     CHECK(start_computation(1) == 0);
-    records[0] = star(100, 32, 5, 65535);
-    records[0].saturated_pixel_count = 4;
-    CHECK(add_focus_point(records, 5000, &exposure) == 1);
-    records[0] = star(32, 32, 5, 30000);
-    CHECK(add_focus_point(records, 5000, &exposure) == 0);
-    records[0] = star(38, 32, 12, 60000);
-    records[0].saturated_pixel_count = 4;
-    CHECK(add_focus_point(records, 5100, &exposure) == 1);
-    records[0] = star(26, 32, 4, 30000);
-    CHECK(add_focus_point(records, 5100, &exposure) == 0);
-    failed_finish(); /* neither rejected frame established or moved an identity */
-}
-
-static void even_combination(void)
-{
-    int32_t focus;
-    uint32_t error, exposure = 1000000;
-    int i;
-    CHECK(start_computation(2) == 0);
-    for (i = 0; i < 7; ++i) {
-        int32_t position = 4700 + 100 * i;
-        memset(records, 0, sizeof(records));
-        records[0] = star(32, 32, vcurve(position, 5000), 30000);
-        records[1] = star(80, 32, vcurve(position, 5020), 30000);
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-    }
-    CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == 5010 && error == 15);
-}
-
-static void late_and_clipped_detections(void)
-{
-    int32_t focus;
-    uint32_t error, exposure = 1000000;
-    int i;
-    CHECK(start_computation(2) == 0);
-    for (i = 0; i < 9; ++i) {
-        int32_t position = 4600 + i * 100;
-        memset(records, 0, sizeof(records));
-        records[0] = star(32, 32, 10, 30000); /* compact, focus-independent object */
-        if (i > 0)
-            records[1] = star(80, 32, vcurve(position, 5000), 30000);
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-    }
-    CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == 5000 && error == 1);
-
-    CHECK(start_computation(1) == 0);
+    reset_records();
+    records[0] = star(20, 32, 5, 100000, 1.0, 0, 0, 1);
+    records[1] = star(60, 32, 5, 100000, 0.9, 0, 0, 1);
+    records[2] = star(100, 32, 5, 100000, 0.5, 0, 0, 1);
+    CHECK(select_focus_stars(records, &exposure) == 0);
     for (i = 0; i < 7; ++i) {
         int32_t position = 4700 + i * 100;
-        memset(records, 0, sizeof(records));
-        records[0] = star(33, 32, vcurve(position, 5000), 30000);
-        if (i > 0) {
-            records[1] = records[0];
-            records[1].x = 32;
-            records[0].saturated_pixel_count = 4;
-        }
+        reset_records();
+        records[0] = star(20, 32, 5, 100000, 1.0, 0, 0, 1);
+        records[1] = star(60, 32, hyperbola(position, 5100),
+            100000, 0.9, 0, 0, 1);
+        records[2] = star(100, 32, hyperbola(position, 5500),
+            100000, 0.5, 0, 0, 1);
         CHECK(add_focus_point(records, position, &exposure) == 0);
-        CHECK(exposure == 1000000);
+        CHECK(finish_focus_point() == 0);
     }
     CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == 5000 && error == 1);
-}
+    CHECK(focus == 5100); /* first valid fits in frozen quality order, limit one */
 
-static void contaminated_field(void)
-{
-    int32_t focus;
-    uint32_t error, exposure = 100000;
-    int i;
-    CHECK(start_computation(3) == 0);
-    for (i = 0; i < 7; ++i) {
-        int32_t position = 4700 + i * 100;
-        memset(records, 0, sizeof(records));
-        records[0] = star(32, 32, 0.1, 65535); /* isolated hot pixel */
-        records[0].saturated_pixel_count = 1;
-        records[1] = star(80, 32, 5, 65535); /* clipped bright star */
-        records[1].saturated_pixel_count = 4;
-        records[2] = star(120, 32, vcurve(position, 5000), 1500);
-        records[2].saturated_pixel_count = i == 3 ? 3 : 0;
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-        CHECK(exposure == 100000);
-    }
-    CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == 5000 && error == 1);
-}
-
-static void robust_combination(void)
-{
-    int32_t focus;
-    uint32_t error, exposure = 1000000;
-    const double centres[] = {5000, 5002, 5500};
-    int i, j;
-    CHECK(start_computation(3) == 0);
-    for (i = 0; i < 11; ++i) {
-        int32_t position = 4200 + 200 * i;
-        memset(records, 0, sizeof(records));
-        for (j = 0; j < 3; ++j)
-            records[j] = star(32 + j * 40, 32, vcurve(position, centres[j]) / 2, 30000);
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-    }
-    CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == 5002);
-    CHECK(error == 3); /* one outlying star does not dominate the median/MAD */
-}
-
-static void fit_quality(void)
-{
-    const double noise[] = {0.3, -0.2, 0.1, -0.1, 0.2, -0.3, 0.1};
-    const int32_t repeats[] = {4800, 4800, 4900, 4900, 5200, 5200};
-    int32_t focus;
-    uint32_t error, exposure = 1000000;
-    int i;
-    CHECK(start_computation(1) == 0);
-    for (i = 0; i < 7; ++i) {
-        int32_t position = 4700 + i * 100;
-        memset(records, 0, sizeof(records));
-        records[0] = star(32, 32, vcurve(position, 5050) + noise[i], 30000);
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-    }
-    CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(abs(focus - 5050) < 25 && error > 1); /* residuals contribute to error */
-
-    CHECK(start_computation(1) == 0);
-    for (i = 0; i < 6; ++i) {
-        records[0] = star(32, 32, 10 - i, 30000); /* one descending branch */
-        CHECK(add_focus_point(records, 4700 + i * 100, &exposure) == 0);
-    }
-    failed_finish();
-    CHECK(start_computation(1) == 0);
-    for (i = 0; i < 7; ++i) {
-        int32_t position = 4700 + i * 100;
-        records[0] = star(32, 32, 10 + 0.01 * vcurve(position, 5000), 30000);
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-    }
-    failed_finish(); /* an extended, almost focus-independent source is not a star curve */
-    CHECK(start_computation(1) == 0);
-    for (i = 0; i < 6; ++i) {
-        records[0] = star(32, 32, 5, 30000); /* no focus dependence */
-        CHECK(add_focus_point(records, 4700 + i * 100, &exposure) == 0);
-    }
-    failed_finish();
-    CHECK(start_computation(1) == 0);
-    for (i = 0; i < 6; ++i) {
-        records[0] = star(32, 32, vcurve(repeats[i], 5000), 30000);
-        CHECK(add_focus_point(records, repeats[i], &exposure) == 0);
-    }
-    failed_finish(); /* repeated frames cannot invent five distinct positions */
-}
-
-static void limits_and_growth(void)
-{
-    int32_t focus;
-    uint32_t error, exposure = 1000000;
-    int i, j;
-    CHECK(start_computation(MAX_STARS) == 0);
-    for (i = 0; i < 21; ++i) { /* grow sample storage past its initial capacity */
-        int32_t position = 4000 + 100 * i;
-        memset(records, 0, sizeof(records));
-        for (j = 0; j < MAX_STARS; ++j)
-            records[j] = star(32 + j * 20, 32, vcurve(position, 5050) / 2, 30000);
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-    }
-    CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == 5050 && error == 1);
-
-    CHECK(start_computation(1) == 0);
-    for (i = 0; i < 7; ++i) {
-        int32_t position = 4700 + 100 * i;
-        memset(records, 0, sizeof(records));
-        records[0] = star(32, 32, vcurve(position, 5050), 30000);
-        records[1] = star(80, 32, 100, 65535); /* beyond the selected limit */
-        CHECK(add_focus_point(records, position, &exposure) == 0);
-    }
-    CHECK(finish_computation(&focus, &error) == 0);
-    CHECK(focus == 5050 && error == 1);
+    select_one(32, &exposure);
+    for (i = 0; i < 7; ++i)
+        add_and_commit(4700 + i * 100, hyperbola(4700 + i * 100, 0),
+            0, 0, 1, 0);
+    require_failed_fit();
 }
 
 int main(void)
 {
-    lifecycle();
-    exposure_guidance();
-    single_star(5050, 5000);
-    single_star(5000.4, 5000);
-    single_star(-5000.6, -5000);
-    single_star(2147483000.4, 2147483000);
-    reordered_identities();
-    missing_and_ambiguous();
-    retry_tracking();
-    even_combination();
-    late_and_clipped_detections();
-    contaminated_field();
-    robust_combination();
-    fit_quality();
-    limits_and_growth();
-    puts("Independent focus-curve native regression passed");
+    layout_and_lifecycle();
+    selection_ranking_and_duplicates();
+    selection_only_no_recruitment();
+    exposure_guidance_and_bounds();
+    exposure_top_count_tracks_requested_limit();
+    best_trial_and_high_risk_samples();
+    missing_and_ambiguous_matches();
+    empty_point_does_not_commit();
+    focus_spread_uncertainty();
+    direct_hyperbola_and_uncertainty(2147483000);
+    direct_hyperbola_and_uncertainty(-2147483000);
+    count_r2_and_repeated_positions();
+    final_limit_and_empty_errors();
+    puts("Redesigned native focus-curve regression passed");
     return 0;
 }

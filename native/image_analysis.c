@@ -30,11 +30,31 @@ static int star_order(const void *left, const void *right)
 
 static int candidate_order(const Candidate *a, const Candidate *b)
 {
-    int clipped_a = a->star.saturated_pixel_count > MAX_SATURATED_PIXELS;
-    int clipped_b = b->star.saturated_pixel_count > MAX_SATURATED_PIXELS;
-    if (clipped_a != clipped_b)
-        return clipped_a - clipped_b;
     return order(a->flux, a->star.x, a->star.y, b->flux, b->star.x, b->star.y);
+}
+
+/* Risks describe this exposure only; they never decide detection or curve validity. */
+static void quality(StarRecord *star, double sky, double mad)
+{
+    double spread = star->qxx + star->qyy;
+    double elongation = hypot(star->qxx - star->qyy, 2 * star->qxy);
+    double noise = fmax(MIN_NOISE_ADU, 1.4826 * mad);
+    double significance = fmax(0, star->max_pixel - sky) / noise;
+    double safe_peak = SAFE_PEAK_FRACTION * 65535;
+    double faint_scale = significance > 0 ?
+        pow(TARGET_PEAK_SIGMA / significance, 2) : 1;
+    double bright_scale = star->max_pixel > 0 ?
+        TARGET_PEAK_FRACTION * 65535 / star->max_pixel : 1;
+
+    star->roundness = spread + elongation > 0 ?
+        sqrt(fmax(0, (spread - elongation) / (spread + elongation))) : 0;
+    star->over_exposed_risk = fmin(1, fmax(0,
+        (star->max_pixel - safe_peak) / (65535 - safe_peak)));
+    star->under_exposed_risk = fmin(1, fmax(0, 1 - significance / TARGET_PEAK_SIGMA));
+    /* A calculated baseline balances sky significance with ADC headroom.
+     * If requirements conflict, headroom wins; subsequent trials supply evidence.
+     */
+    star->exposure_scale = fmin(bright_scale, fmax(1, faint_scale));
 }
 
 /* Keep only the best candidates in a small, ordered, bounded array. */
@@ -178,7 +198,7 @@ static int measure(const uint16_t *pixels, uint32_t width, uint32_t height,
 
 /* Validate before shortlisting so bright extended objects cannot consume slots. */
 static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
-    double sky, double minimum_signal, int limit, Candidate *candidates)
+    double sky, double mad, double minimum_signal, Candidate *candidates)
 {
     size_t count = (size_t)width * height, seed, head, tail, capacity = 1024;
     size_t *queue;
@@ -238,8 +258,10 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
             Candidate candidate;
             candidate.flux = flux;
             if (measure(pixels, width, height, sky, sx / flux, sy / flux,
-                        &candidate.star))
-                retain(candidates, &selected, limit, candidate);
+                        &candidate.star)) {
+                quality(&candidate.star, sky, mad);
+                retain(candidates, &selected, MAX_STARS, candidate);
+            }
         }
     }
     free(queue);
@@ -248,29 +270,26 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
 }
 
 int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
-    uint32_t height, uint32_t median, uint32_t mad, uint32_t max_stars,
+    uint32_t height, uint32_t median, uint32_t mad,
     StarRecord *stars)
 {
     Candidate candidates[MAX_STARS];
-    int selected, i, found = 0;
+    int selected, i;
 
     if (!stars)
         return -1;
     memset(stars, 0, sizeof(*stars));
     if (!pixels || !width || !height ||
-        width > INT32_MAX || height > INT32_MAX || max_stars > MAX_STARS ||
+        width > INT32_MAX || height > INT32_MAX ||
         (size_t)width > SIZE_MAX / height / sizeof(*pixels))
         return -1;
-    if (max_stars == 0)
-        return 0;
-    selected = discover(pixels, width, height, median,
-        fmax(MIN_SIGNAL_INCREMENT_ADU, MAD_MULTIPLIER * (double)mad),
-        (int)max_stars, candidates);
+    selected = discover(pixels, width, height, median, mad,
+        fmax(MIN_SIGNAL_INCREMENT_ADU, MAD_MULTIPLIER * (double)mad), candidates);
     if (selected < 0)
         return selected;
     for (i = 0; i < selected; ++i)
-        stars[found++] = candidates[i].star;
-    qsort(stars, found, sizeof(*stars), star_order);
-    memset(stars + found, 0, sizeof(*stars));
-    return found;
+        stars[i] = candidates[i].star;
+    qsort(stars, selected, sizeof(*stars), star_order);
+    memset(stars + selected, 0, sizeof(*stars));
+    return selected;
 }
