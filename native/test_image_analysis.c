@@ -25,7 +25,7 @@ static int analyze_background(uint16_t *pixels, unsigned width, unsigned height,
 {
     int result;
     memset(stars, 0xa5, sizeof(stars));
-    result = AnalyzeStars(pixels, width, height, background, 16, limit, stars);
+    result = AnalyzeStars(pixels, width, height, background, 0, limit, stars);
     CHECK(result >= 0 && (unsigned)result <= limit);
     CHECK(stars[result].positive_pixel_count == 0);
     return result;
@@ -124,6 +124,30 @@ static void gaussian(void)
     CHECK(analyze(pixels, 128, 128) == 0);
 }
 
+static void median_and_mad(void)
+{
+    uint16_t pixels[64 * 64];
+    unsigned i;
+    const unsigned indices[] = {32 * 64 + 32, 32 * 64 + 33, 33 * 64 + 32};
+    fill(pixels, 64 * 64, 1000);
+    for (i = 0; i < 3; ++i)
+        pixels[indices[i]] = 1120;
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 20, 10, stars) == 0);
+    for (i = 0; i < 3; ++i)
+        pixels[indices[i]] = 1121;
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 20, 10, stars) == 1);
+    NEAR(stars[0].flux, 363, 1e-12);
+    CHECK(AnalyzeStars(pixels, 64, 64, 1100, 20, 10, stars) == 0);
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, UINT32_MAX, 10, stars) == 0);
+    CHECK(stars[0].positive_pixel_count == 0);
+    for (i = 0; i < 3; ++i)
+        pixels[indices[i]] = 1016;
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 2, 10, stars) == 0);
+    for (i = 0; i < 3; ++i)
+        pixels[indices[i]] = 1017;
+    CHECK(AnalyzeStars(pixels, 64, 64, 1000, 2, 10, stars) == 1);
+}
+
 static void limit_and_independence(void)
 {
     enum { WIDTH = 704 };
@@ -149,7 +173,7 @@ static void limit_and_independence(void)
     for (x = 1; x < MAX_STARS; ++x)
         CHECK(stars[x - 1].flux > stars[x].flux);
     fill(pixels, WIDTH * WIDTH, 2000);
-    CHECK(AnalyzeStars(pixels, WIDTH, WIDTH, 2000, 16, 10, other) == 0);
+    CHECK(AnalyzeStars(pixels, WIDTH, WIDTH, 2000, 0, 10, other) == 0);
     NEAR(stars[255].y, 64, 1e-12); /* no process-global result storage */
     free(pixels);
 }
@@ -185,7 +209,7 @@ static void selection_and_order(void)
     NEAR(stars[1].flux, 1200, 1e-12);
     CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 10) == 3);
     CHECK(analyze_limit(pixels, WIDTH, HEIGHT, 0) == 0);
-    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 16, 257, stars) == -1);
+    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 0, 257, stars) == -1);
     CHECK(stars[0].positive_pixel_count == 0);
 
     /* Equal discovery/measured flux: X precedes Y, even at the selection cut. */
@@ -255,7 +279,7 @@ static void contaminated_candidates(void)
     CHECK(stars[0].saturated_pixel_count > 3);
     CHECK(stars[1].saturated_pixel_count == 0);
 
-    /* A supplied noise threshold suppresses connected noise without changing sky. */
+    /* Supplied MAD gives a 192-ADU threshold without changing the median. */
     for (y = 0; y < HEIGHT; ++y)
         for (x = 0; x < WIDTH; ++x)
             pixels[y * WIDTH + x] = (uint16_t)(1000 + ((x * 17 + y * 31) % 97) - 48);
@@ -266,7 +290,7 @@ static void contaminated_candidates(void)
                 exp(-(dx * dx + dy * dy) / 8));
         }
     }
-    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 192, 1, stars) == 1);
+    CHECK(AnalyzeStars(pixels, WIDTH, HEIGHT, 1000, 32, 1, stars) == 1);
     NEAR(stars[0].x, 152, 0.2);
     NEAR(stars[0].y, 144, 0.2);
     CHECK(stars[1].positive_pixel_count == 0);
@@ -278,10 +302,11 @@ int main(void)
     CHECK(offsetof(StarRecord, max_pixel) == 64);
     small_sources();
     gaussian();
+    median_and_mad();
     limit_and_independence();
     selection_and_order();
     contaminated_candidates();
-    CHECK(AnalyzeStars(NULL, 64, 64, 1000, 16, 10, stars) == -1);
+    CHECK(AnalyzeStars(NULL, 64, 64, 1000, 0, 10, stars) == -1);
     CHECK(stars[0].positive_pixel_count == 0);
     puts("Star analysis native regression passed");
     return 0;

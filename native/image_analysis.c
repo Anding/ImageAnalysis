@@ -1,12 +1,12 @@
 #include "image_analysis.h"
+#include "analysis_parameters.h"
 
 #include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum { APERTURE = 16, RADIAL_SCALE = 16,
-    RADIAL_BINS = 2 * APERTURE * RADIAL_SCALE + 1 };
+enum { RADIAL_BINS = 2 * APERTURE_RADIUS_PIXELS * RADIAL_BINS_PER_PIXEL + 1 };
 
 typedef struct Candidate {
     double flux;
@@ -30,8 +30,8 @@ static int star_order(const void *left, const void *right)
 
 static int candidate_order(const Candidate *a, const Candidate *b)
 {
-    int clipped_a = a->star.saturated_pixel_count > 3;
-    int clipped_b = b->star.saturated_pixel_count > 3;
+    int clipped_a = a->star.saturated_pixel_count > MAX_SATURATED_PIXELS;
+    int clipped_b = b->star.saturated_pixel_count > MAX_SATURATED_PIXELS;
     if (clipped_a != clipped_b)
         return clipped_a - clipped_b;
     return order(a->flux, a->star.x, a->star.y, b->flux, b->star.x, b->star.y);
@@ -61,8 +61,9 @@ static void retain(Candidate *candidates, int *count, int limit, Candidate candi
 
 static int inside(double x, double y, uint32_t width, uint32_t height)
 {
-    return x >= APERTURE && y >= APERTURE &&
-        x + APERTURE <= width - 1.0 && y + APERTURE <= height - 1.0;
+    return x >= APERTURE_RADIUS_PIXELS && y >= APERTURE_RADIUS_PIXELS &&
+        x + APERTURE_RADIUS_PIXELS <= width - 1.0 &&
+        y + APERTURE_RADIUS_PIXELS <= height - 1.0;
 }
 
 /* Refine the detection centroid with all positive signal in its aperture. */
@@ -77,15 +78,16 @@ static int measure(const uint16_t *pixels, uint32_t width, uint32_t height,
 
     if (!inside(cx, cy, width, height))
         return 0;
-    left = (int)ceil(cx - APERTURE);
-    right = (int)floor(cx + APERTURE);
-    top = (int)ceil(cy - APERTURE);
-    bottom = (int)floor(cy + APERTURE);
+    left = (int)ceil(cx - APERTURE_RADIUS_PIXELS);
+    right = (int)floor(cx + APERTURE_RADIUS_PIXELS);
+    top = (int)ceil(cy - APERTURE_RADIUS_PIXELS);
+    bottom = (int)floor(cy + APERTURE_RADIUS_PIXELS);
     for (y = top; y <= bottom; ++y) {
         for (x = left; x <= right; ++x) {
             double dx = x - cx, dy = y - cy;
             double signal = pixels[(size_t)y * width + x] - sky;
-            if (dx * dx + dy * dy <= APERTURE * APERTURE && signal > 0) {
+            if (dx * dx + dy * dy <= APERTURE_RADIUS_PIXELS * APERTURE_RADIUS_PIXELS &&
+                signal > 0) {
                 flux += signal;
                 sx += signal * x;
                 sy += signal * y;
@@ -99,10 +101,10 @@ static int measure(const uint16_t *pixels, uint32_t width, uint32_t height,
     if (!inside(cx, cy, width, height))
         return 0;
 
-    left = (int)ceil(cx - APERTURE);
-    right = (int)floor(cx + APERTURE);
-    top = (int)ceil(cy - APERTURE);
-    bottom = (int)floor(cy + APERTURE);
+    left = (int)ceil(cx - APERTURE_RADIUS_PIXELS);
+    right = (int)floor(cx + APERTURE_RADIUS_PIXELS);
+    top = (int)ceil(cy - APERTURE_RADIUS_PIXELS);
+    bottom = (int)floor(cy + APERTURE_RADIUS_PIXELS);
     memset(star, 0, sizeof(*star));
     flux = sx = sy = 0;
     for (y = top; y <= bottom; ++y) {
@@ -111,7 +113,7 @@ static int measure(const uint16_t *pixels, uint32_t width, uint32_t height,
             double r2 = dx * dx + dy * dy;
             uint16_t value;
             double signal;
-            if (r2 > APERTURE * APERTURE)
+            if (r2 > APERTURE_RADIUS_PIXELS * APERTURE_RADIUS_PIXELS)
                 continue;
             value = pixels[(size_t)y * width + x];
             if (value > star->max_pixel)
@@ -150,10 +152,11 @@ static int measure(const uint16_t *pixels, uint32_t width, uint32_t height,
         for (x = left; x <= right; ++x) {
             double dx = x - cx, dy = y - cy;
             double signal = pixels[(size_t)y * width + x] - sky;
-            if (dx * dx + dy * dy <= APERTURE * APERTURE && signal > 0) {
+            if (dx * dx + dy * dy <= APERTURE_RADIUS_PIXELS * APERTURE_RADIUS_PIXELS &&
+                signal > 0) {
                 dx = x - star->x;
                 dy = y - star->y;
-                bin = (unsigned)(sqrt(dx * dx + dy * dy) * RADIAL_SCALE);
+                bin = (unsigned)(sqrt(dx * dx + dy * dy) * RADIAL_BINS_PER_PIXEL);
                 if (bin >= RADIAL_BINS)
                     bin = RADIAL_BINS - 1;
                 radial[bin] += signal;
@@ -165,12 +168,12 @@ static int measure(const uint16_t *pixels, uint32_t width, uint32_t height,
         cumulative += radial[bin];
         if (cumulative >= flux * 0.5) {
             star->hfd = 2 * (bin + (flux * 0.5 - previous) / radial[bin])
-                / RADIAL_SCALE;
+                / RADIAL_BINS_PER_PIXEL;
             break;
         }
     }
-    /* Reject single-pixel peaks and sources wider than the useful aperture. */
-    return star->hfd >= 1 && star->hfd <= APERTURE;
+    /* Reject single-pixel peaks and sources outside the useful HFD range. */
+    return star->hfd >= MIN_HFD_PIXELS && star->hfd <= MAX_HFD_PIXELS;
 }
 
 /* Validate before shortlisting so bright extended objects cannot consume slots. */
@@ -231,7 +234,7 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
                 }
             }
         }
-        if (tail >= 3) {
+        if (tail >= MIN_COMPONENT_PIXELS) {
             Candidate candidate;
             candidate.flux = flux;
             if (measure(pixels, width, height, sky, sx / flux, sy / flux,
@@ -245,7 +248,7 @@ static int discover(const uint16_t *pixels, uint32_t width, uint32_t height,
 }
 
 int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
-    uint32_t height, uint32_t background, uint32_t minimum_signal, uint32_t max_stars,
+    uint32_t height, uint32_t median, uint32_t mad, uint32_t max_stars,
     StarRecord *stars)
 {
     Candidate candidates[MAX_STARS];
@@ -260,7 +263,8 @@ int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
         return -1;
     if (max_stars == 0)
         return 0;
-    selected = discover(pixels, width, height, background, fmax(16, minimum_signal),
+    selected = discover(pixels, width, height, median,
+        fmax(MIN_SIGNAL_INCREMENT_ADU, MAD_MULTIPLIER * (double)mad),
         (int)max_stars, candidates);
     if (selected < 0)
         return selected;

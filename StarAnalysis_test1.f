@@ -57,30 +57,32 @@ T{ stars.test.frame FRAME_METADATA @ map-count }T 5 ==
 T{ s" NSTARS" stars.test.frame FRAME_METADATA @ map@ }T 0 0 ==
 T{ s" HFD" stars.test.frame FRAME_METADATA @ map@ }T 0 0 ==
 
-\ MEDIAN metadata supplies the background even without a populated histogram.
+\ Existing statistics suffice after erasing the FITS map; no metadata is required.
 stars.test.other stars.test.background
-T{ stars.test.other star-background }T 0 ==
-s" invalid" stars.test.other FRAME_METADATA @ =>" MEDIAN"
-T{ stars.test.other star-background }T 0 ==
-s" -1" stars.test.other FRAME_METADATA @ =>" MEDIAN"
-T{ stars.test.other star-background }T 0 ==
-s" 65536" stars.test.other FRAME_METADATA @ =>" MEDIAN"
-T{ stars.test.other star-background }T 0 ==
-s" 1000.5" stars.test.other FRAME_METADATA @ =>" MEDIAN"
-T{ stars.test.other star-background }T 0 ==
-s" 4294968296" stars.test.other FRAME_METADATA @ =>" MEDIAN"
-T{ stars.test.other star-background }T 0 ==
-s" 1000" stars.test.other FRAME_METADATA @ =>" MEDIAN"
-T{ stars.test.other star-background }T 1000 ==
+stars.test.other compute-imageStats
+stars.test.other FRAME_METADATA @ erase-map
 T{ stars.test.other analyze-stars }T ==
-T{ stars.test.other FRAME_METADATA @ map-count }T 1 ==
+T{ stars.test.other FRAME_METADATA @ map-count }T 0 ==
 T{ stars.test.other FRAME_STARS @ star.positive-pixel-count @ }T 0 ==
 T{ stars.test.list star.positive-pixel-count @ }T 3 ==
 
+\ Even misleading metadata cannot replace the frame's statistical median.
+s" invalid" stars.test.frame FRAME_METADATA @ =>" MEDIAN"
+T{ stars.test.frame analyze-stars }T ==
+T{ stars.test.list star.positive-pixel-count @ }T 3 ==
+\ Pass raw MAD: 10 admits this triangle; 20 leaves only one bright pixel.
+10 stars.test.stats MEDIAN_ABSOLUTE_DEVIATION !
+T{ stars.test.frame analyze-stars }T ==
+T{ stars.test.list star.positive-pixel-count @ }T 3 ==
+20 stars.test.stats MEDIAN_ABSOLUTE_DEVIATION !
+T{ stars.test.frame analyze-stars }T ==
+T{ stars.test.list star.positive-pixel-count @ }T 0 ==
+0 stars.test.stats MEDIAN_ABSOLUTE_DEVIATION !
+
+\ The existing hot-pixel rejection also excludes a peak with two weak neighbours.
 65535 33 32 stars.test.pixel
 stars.test.frame analyze-stars
-T{ stars.test.list star.max-pixel w@ }T 65535 ==
-T{ stars.test.list star.saturated-pixel-count @ }T 1 ==
+T{ stars.test.list star.positive-pixel-count @ }T 0 ==
 \ A native failure empties the list and returns without aborting the run.
 0 stars.test.frame FRAME_WIDTH !
 T{ stars.test.frame analyze-stars }T ==

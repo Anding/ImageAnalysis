@@ -31,9 +31,9 @@ See `StarAnalysis_test1.f` for an executable synthetic-frame tutorial.
 
 ## Native contract
 
-`AnalyzeStars(pixels, width, height, background, minimum_signal, max_stars, stars)` receives a
+`AnalyzeStars(pixels, width, height, median, mad, max_stars, stars)` receives a
 contiguous unsigned 16-bit bitmap, its logical dimensions, the already
-calculated background and detection threshold in ADU, a per-call measurement limit, and the output
+calculated image-wide median and raw MAD in ADU, a per-call measurement limit, and the output
 address. `StarAnalysis.f` defines `starAnalysis.star-limit` with default 10.
 Callers can change it directly; `analyze-stars` reads its current value and
 passes it to C. Temporary overrides are saved/restored by their callers.
@@ -45,8 +45,20 @@ above 256; `-2` allocation failure).
 There is no native background calculation, SNR, frame summary, equipment
 context or run state.
 
-The existing Forth binding supplies `max(16, 6 * MAD)` from frame statistics.
-Detection uses eight-connected pixels **greater than median + max(16, minimum_signal) ADU**, at
+The Forth binding reads both values directly from `FRAME_STATISTICS`, without
+reading FITS metadata or recalculating a histogram. C calculates
+`max(MIN_SIGNAL_INCREMENT_ADU, MAD_MULTIPLIER * mad)` above the median.
+The seven-argument layout and `StarRecord` are unchanged, but the fifth argument
+now means **raw MAD**, not a precomputed threshold. Update the DLL and Forth
+binding together, and restart Forth after deployment.
+
+`native\analysis_parameters.h` contains the compile-time detection, measurement,
+tracking, curve-quality and exposure-guidance settings, with units and comments.
+Rebuild the DLL after changing them; Forth and the C implementation do not duplicate
+the tuning values. Mathematical constants and ABI capacities are not tuning
+parameters. The following description uses the unchanged default values.
+
+Detection uses eight-connected pixels **greater than median + max(16, 6 * MAD) ADU**, at
 least three pixels per component. Each component supplies one candidate;
 there is no deblending. Discovery scans the **whole bitmap**, accumulating
 background-subtracted flux over each component's above-threshold pixels.

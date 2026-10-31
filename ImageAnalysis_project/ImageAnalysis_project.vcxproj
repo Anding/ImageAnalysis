@@ -128,6 +128,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\native\analysis_parameters.h" />
     <ClInclude Include="..\native\image_analysis.h" />
     <ClInclude Include="..\native\focus_curve.h" />
   </ItemGroup>

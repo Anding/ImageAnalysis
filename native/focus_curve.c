@@ -1,4 +1,5 @@
 #include "focus_curve.h"
+#include "analysis_parameters.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -43,17 +44,17 @@ int CALL start_computation(uint32_t max_stars)
 
 static int usable(const StarRecord *star)
 {
-    /* A uniform 16-pixel aperture has HFD about 23: it is not a resolved star. */
     return isfinite(star->x) && isfinite(star->y) &&
-        isfinite(star->hfd) && star->hfd >= 1 && star->hfd <= 16;
+        isfinite(star->hfd) && star->hfd >= MIN_HFD_PIXELS &&
+        star->hfd <= MAX_HFD_PIXELS;
 }
 
-/* Mutual nearest neighbours within eight pixels; never share a detection. */
+/* Mutual nearest neighbours within the configured radius; never share a detection. */
 static void match(const StarRecord *stars, int count, int *indices, int *clipped)
 {
     int i, j;
     for (i = 0; i < run.tracked; ++i) {
-        double best = 64;
+        double best = MATCH_RADIUS_PIXELS * MATCH_RADIUS_PIXELS;
         int selected = -1, tied = 0;
         for (j = 0; j < count; ++j) {
             double dx, dy, distance;
@@ -62,8 +63,8 @@ static void match(const StarRecord *stars, int count, int *indices, int *clipped
             dx = stars[j].x - run.x[i];
             dy = stars[j].y - run.y[i];
             distance = dx * dx + dy * dy;
-            if (stars[j].saturated_pixel_count > 3) {
-                if (distance <= 64)
+            if (stars[j].saturated_pixel_count > MAX_SATURATED_PIXELS) {
+                if (distance <= MATCH_RADIUS_PIXELS * MATCH_RADIUS_PIXELS)
                     *clipped = 1;
                 continue;
             }
@@ -92,9 +93,9 @@ static void match(const StarRecord *stars, int count, int *indices, int *clipped
 /* Only widespread clipping warrants a shorter exposure; dim is not unusable. */
 static int exposure_status(uint32_t *exposure)
 {
-    uint32_t recommended = *exposure / 2;
-    if (recommended < 100000)
-        recommended = 100000;
+    uint32_t recommended = *exposure / EXPOSURE_REDUCTION_DIVISOR;
+    if (recommended < MIN_EXPOSURE_US)
+        recommended = MIN_EXPOSURE_US;
     if (recommended >= *exposure)
         return -1;
     *exposure = recommended;
@@ -116,7 +117,7 @@ int CALL add_focus_point(const StarRecord *stars, int32_t focus_position,
         for (i = 0; i < count; ++i) {
             if (!usable(stars + i))
                 continue;
-            if (stars[i].saturated_pixel_count > 3) {
+            if (stars[i].saturated_pixel_count > MAX_SATURATED_PIXELS) {
                 clipped = 1;
                 continue;
             }
@@ -128,11 +129,11 @@ int CALL add_focus_point(const StarRecord *stars, int32_t focus_position,
         /* Fill unused slots when new stars appear; never replace a lost identity. */
         for (i = 0; i < count && tracked < run.limit; ++i) {
             int j;
-            if (!usable(stars + i) || stars[i].saturated_pixel_count > 3)
+            if (!usable(stars + i) || stars[i].saturated_pixel_count > MAX_SATURATED_PIXELS)
                 continue;
             for (j = 0; j < run.tracked; ++j) {
                 double dx = stars[i].x - run.x[j], dy = stars[i].y - run.y[j];
-                if (dx * dx + dy * dy <= 64)
+                if (dx * dx + dy * dy <= MATCH_RADIUS_PIXELS * MATCH_RADIUS_PIXELS)
                     break;
             }
             if (j == run.tracked)
@@ -145,7 +146,7 @@ int CALL add_focus_point(const StarRecord *stars, int32_t focus_position,
         if (indices[i] < 0)
             continue;
         star = stars + indices[i];
-        if (star->saturated_pixel_count > 3) {
+        if (star->saturated_pixel_count > MAX_SATURATED_PIXELS) {
             indices[i] = -1;
             clipped = 1;
             continue;
@@ -230,14 +231,14 @@ static int fit_curve(CurvePoint *points, size_t count, double *focus, double *er
     double best_sse = HUGE_VAL;
     int fitted = 0;
 
-    if (count < 5)
+    if (count < MIN_FOCUS_POSITIONS || count < 2 * MIN_BRANCH_POINTS)
         return 0;
     qsort(points, count, sizeof(*points), point_order);
     for (i = 1; i < count; ++i)
         distinct += points[i].x != points[i - 1].x;
-    if (distinct < 5)
+    if (distinct < MIN_FOCUS_POSITIONS)
         return 0;
-    for (split = 2; split <= count - 2; ++split) {
+    for (split = MIN_BRANCH_POINTS; split <= count - MIN_BRANCH_POINTS; ++split) {
         Line left, right;
         double x, y, contrast, sse, variance, dx_left, dx_right, slope_difference;
         if (points[split - 1].x == points[split].x ||
@@ -251,7 +252,7 @@ static int fit_curve(CurvePoint *points, size_t count, double *focus, double *er
         if (x < points[split - 1].x || x > points[split].x)
             continue;
         y = left.y + left.slope * (x - left.x);
-        contrast = fmax(0.5, 0.1 * y);
+        contrast = fmax(MIN_BRANCH_RISE_PIXELS, MIN_BRANCH_RISE_FRACTION * y);
         if (y <= 0 ||
             left.slope * (points[0].x - x) < contrast ||
             right.slope * (points[count - 1].x - x) < contrast)
@@ -285,7 +286,7 @@ int CALL finish_computation(int32_t *best_focus, uint32_t *error)
 
     if (!run.active)
         return -1;
-    if (!best_focus || !error || run.count < 5)
+    if (!best_focus || !error || run.count < MIN_FOCUS_POSITIONS)
         goto done;
     points = malloc(run.count * sizeof(*points));
     if (!points)

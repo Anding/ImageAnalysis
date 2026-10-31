@@ -32,11 +32,12 @@ typedef struct StarRecord {
 
 /*
  * pixels: contiguous width*height unsigned 16-bit samples.
- * background: previously calculated median, in unsigned 16-bit ADU.
- * minimum_signal: detection threshold above background, in ADU (minimum 16).
- * Supply a noise-dependent threshold, e.g. six times the existing image MAD.
- * max_stars: 0..MAX_STARS; prefer candidates with at most three saturated pixels,
- * then select by discovery flux after rejecting invalid apertures and HFD
+ * median, mad: previously calculated image-wide statistics, in ADU.
+ * C calculates the signal threshold from analysis_parameters.h:
+ * max(MIN_SIGNAL_INCREMENT_ADU, MAD_MULTIPLIER * mad), above median.
+ * The fifth argument is raw MAD, not a precomputed threshold.
+ * max_stars: 0..MAX_STARS; with default parameters, prefer candidates with at most
+ * three saturated pixels, then select by discovery flux after rejecting invalid apertures and HFD
  * outside 1..16 pixels. No deblending or galaxy classification:
  * compact galaxy nuclei can resemble stars and require focus-curve validation.
  * stars: space for MAX_STARS records plus a zero terminator.
@@ -45,7 +46,7 @@ typedef struct StarRecord {
  * On error the output list is empty. Inputs are never modified.
  */
 EXPORT int CALL AnalyzeStars(const uint16_t *pixels, uint32_t width,
-    uint32_t height, uint32_t background, uint32_t minimum_signal, uint32_t max_stars,
+    uint32_t height, uint32_t median, uint32_t mad, uint32_t max_stars,
     StarRecord *stars);
 
 #ifdef __cplusplus

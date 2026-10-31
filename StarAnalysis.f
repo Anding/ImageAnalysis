@@ -5,26 +5,20 @@ need ForthVT100
 
 LIBRARY: ImageAnalysisNative.dll
 Extern: int "C" AnalyzeStars(
-    int * pixels, int width, int height, int background, int minimum_signal,
+    int * pixels, int width, int height, int median, int mad,
     int max_stars, int * stars
 ) ;
 
-: star-background { frame | low high rest remaining -- background }
-\ Read integer MEDIAN metadata; missing, malformed or out-of-range means zero.
-    0 0 s" MEDIAN" frame FRAME_METADATA @ map@ >number
-    -> remaining -> rest -> high -> low
-    remaining high or 0= low 65536 u< and if low else 0 then
-;
-
-: analyze-stars { frame -- }
+: analyze-stars { frame | stats -- }
 \ Measure the brightest candidates using the current starAnalysis.star-limit.
 \ Return a flux-ordered list, with a zero terminator and no FITS output.
-\ Background comes from MEDIAN metadata, not a histogram calculation.
+\ Pass existing median/MAD statistics; C owns the configured detection threshold.
+    frame FRAME_STATISTICS @ -> stats
     frame FRAME_BITMAP
     frame FRAME_WIDTH @
     frame FRAME_HEIGHT @
-    frame star-background
-    frame FRAME_STATISTICS @ MEDIAN_ABSOLUTE_DEVIATION @ 6 * 16 max
+    stats MEDIAN @
+    stats MEDIAN_ABSOLUTE_DEVIATION @
     starAnalysis.star-limit
     frame FRAME_STARS @
     AnalyzeStars 0< IF s" Native star analysis failed" .E> THEN

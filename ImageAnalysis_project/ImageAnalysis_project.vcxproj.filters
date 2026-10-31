@@ -20,6 +20,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\native\analysis_parameters.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\native\focus_curve.h">
       <Filter>Header Files</Filter>
     </ClInclude>
